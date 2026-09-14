@@ -1,0 +1,116 @@
+/* Biometric Gate — frontend lockout overlay styles.
+   Deliberately framework-agnostic: no theme-specific selectors, generic <video>/<iframe>
+   targeting only, so this ships identically on any WordPress site (spec #11). */
+
+html.bg-gate-blur-active body > *:not(#bg-gate-overlay) {
+	filter: blur(18px);
+	pointer-events: none;
+	user-select: none;
+}
+
+.bg-gate-locked-body {
+	margin: 0;
+	min-height: 100vh;
+	background: #0b0c10;
+}
+
+#bg-gate-overlay {
+	position: fixed;
+	inset: 0;
+	width: 100vw;
+	height: 100vh;
+	z-index: 999999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(10, 12, 16, 0.92);
+	color: #f5f6f7;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	text-align: center;
+	padding: 24px;
+	box-sizing: border-box;
+}
+
+#bg-gate-overlay[hidden] {
+	display: none;
+}
+
+.bg-gate-card {
+	max-width: 420px;
+	width: 100%;
+}
+
+.bg-gate-card h2 {
+	font-size: 1.25rem;
+	margin: 0 0 8px;
+}
+
+.bg-gate-status {
+	min-height: 1.4em;
+	margin: 0 0 16px;
+	font-size: 0.95rem;
+	opacity: 0.85;
+}
+
+.bg-gate-video-frame {
+	width: 240px;
+	height: 240px;
+	max-width: 60vw;
+	max-height: 60vw;
+	margin: 0 auto 20px;
+	border-radius: 50%;
+	overflow: hidden;
+	background: #1a1c22;
+	border: 3px solid #3a8dff;
+}
+
+.bg-gate-video-frame video {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transform: scaleX(-1); /* Mirror, matching how users expect to see themselves. */
+}
+
+.bg-gate-start-btn {
+	appearance: none;
+	border: none;
+	border-radius: 999px;
+	background: #3a8dff;
+	color: #fff;
+	font-size: 1rem;
+	font-weight: 600;
+	padding: 14px 32px;
+	cursor: pointer;
+	min-height: 48px; /* Comfortable mobile tap target. */
+}
+
+.bg-gate-start-btn:active {
+	background: #2f74d6;
+}
+
+.bg-gate-start-btn[disabled] {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.bg-gate-camera-select {
+	display: block;
+	margin: 0 auto 16px;
+	max-width: 100%;
+}
+
+.bg-gate-noscript-message,
+.bg-gate-block-message {
+	max-width: 480px;
+	margin: 20vh auto 0;
+	padding: 24px;
+	color: #f5f6f7;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	text-align: center;
+}
+
+@media (max-width: 480px) {
+	.bg-gate-card h2 {
+		font-size: 1.1rem;
+	}
+}

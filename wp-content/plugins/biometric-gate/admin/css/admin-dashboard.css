@@ -1,0 +1,24 @@
+/* Biometric Gate admin dashboard — relies on core WP admin classes (widefat, button,
+   form-table, nav-tab-wrapper) for visual consistency; this file only adds spacing. */
+
+.bg-admin-wrap .bg-admin-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 16px 0;
+}
+
+.bg-admin-wrap table.widefat td,
+.bg-admin-wrap table.widefat th {
+	vertical-align: middle;
+}
+
+.bg-admin-wrap .bg-admin-pagination {
+	margin: 12px 0;
+}
+
+#bg-export-wipe-status {
+	font-style: italic;
+	opacity: 0.8;
+}
