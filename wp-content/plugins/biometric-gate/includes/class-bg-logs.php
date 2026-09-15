@@ -141,7 +141,7 @@ class BG_Logs {
 		global $wpdb;
 
 		$logs_table = BG_Activator::table_name();
-		$handle     = fopen( $filepath, 'w' );
+		$handle     = @fopen( $filepath, 'w' );
 
 		if ( false === $handle ) {
 			return 0;
@@ -315,7 +315,7 @@ class BG_Logs {
 		global $wpdb;
 
 		$logs_table = BG_Activator::table_name();
-		$handle     = fopen( $filepath, 'w' );
+		$handle     = @fopen( $filepath, 'w' );
 		if ( false === $handle ) {
 			return;
 		}
