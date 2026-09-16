@@ -173,9 +173,10 @@ class BG_Enrollment {
 	 * @return string|WP_Error Raw cropped image binary.
 	 */
 	private static function crop_portrait_via_pixlab( $image_path ) {
-		if ( ! defined( 'BIOMETRIC_GATE_PIXLAB_API_KEY' ) || '' === BIOMETRIC_GATE_PIXLAB_API_KEY ) {
-			return new WP_Error( 'bg_pixlab_not_configured', __( 'PixLab API key is not configured in wp-config.php.', 'biometric-gate' ) );
+		if ( '' === BG_Settings::get_pixlab_api_key() ) {
+			return new WP_Error( 'bg_pixlab_not_configured', __( 'PixLab API key is not configured in settings.', 'biometric-gate' ) );
 		}
+
 
 		$image_data = file_get_contents( $image_path );
 		if ( false === $image_data ) {
@@ -190,7 +191,7 @@ class BG_Enrollment {
 				'timeout' => 15,
 				'body'    => array(
 					'img' => $b64,
-					'key' => BIOMETRIC_GATE_PIXLAB_API_KEY,
+					'key' => BG_Settings::get_pixlab_api_key(),
 				),
 			)
 		);
@@ -213,7 +214,7 @@ class BG_Enrollment {
 				'timeout' => 15,
 				'body'    => array(
 					'img'    => $b64,
-					'key'    => BIOMETRIC_GATE_PIXLAB_API_KEY,
+					'key'    => BG_Settings::get_pixlab_api_key(),
 					'left'   => $face['left'],
 					'top'    => $face['top'],
 					'width'  => $face['width'],
