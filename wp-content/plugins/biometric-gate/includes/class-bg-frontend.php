@@ -59,6 +59,7 @@ class BG_Frontend {
 				'scanThresholdSec' => (int) $settings['scan_threshold_secs'],
 				'guardWindowSec'   => (int) $settings['guard_window_secs'],
 				'noCameraMessage'  => wp_kses_post( $settings['no_camera_message'] ),
+				'isAdmin'          => current_user_can( 'manage_options' ),
 				'i18n'             => array(
 					'startScan'      => __( 'Start Face Scan', 'biometric-gate' ),
 					'verifying'      => __( 'Verifying your identity…', 'biometric-gate' ),

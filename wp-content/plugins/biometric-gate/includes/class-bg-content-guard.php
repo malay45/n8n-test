@@ -36,6 +36,13 @@ class BG_Content_Guard {
 
 		$user_id = get_current_user_id();
 
+		if ( current_user_can( 'manage_options' ) && isset( $_POST['bg_dev_bypass_submit'], $_POST['bg_dev_bypass_nonce'] ) && wp_verify_nonce( $_POST['bg_dev_bypass_nonce'], 'bg_dev_bypass' ) ) {
+			BG_Session::mark_verified( $user_id );
+			BG_Logs::insert( $user_id, 'success', 'Admin Dev Bypass', BG_Route_Matcher::current_path() );
+			wp_safe_redirect( home_url( BG_Route_Matcher::current_path() ) );
+			exit;
+		}
+
 		// The guard window (not the longer scan threshold) governs whether a *fresh page
 		// request* needs a new scan (spec #3's Trigger A: "repetitive page entry scans" are
 		// what the guard window skips). The scan threshold instead paces the ongoing
@@ -85,6 +92,16 @@ class BG_Content_Guard {
 			<?php echo wp_kses_post( self::message_for( $mode ) ); ?>
 		</div>
 	</noscript>
+	<?php if ( current_user_can( 'manage_options' ) ) : ?>
+		<div style="text-align:center; margin-top:20px; position:relative; z-index:9999;">
+			<form method="post" action="">
+				<?php wp_nonce_field( 'bg_dev_bypass', 'bg_dev_bypass_nonce' ); ?>
+				<button type="submit" name="bg_dev_bypass_submit" style="padding:10px 20px; background:#d63638; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
+					Admin Dev Bypass
+				</button>
+			</form>
+		</div>
+	<?php endif; ?>
 </div>
 <?php wp_footer(); ?>
 </body>
