@@ -248,7 +248,7 @@ class BG_Admin_Page
 							for="retention"><?php esc_html_e('Log Retention Purge Limit', 'biometric-gate'); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach (array('30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever') as $value => $label): ?>
+							<?php foreach (array('1' => '1 Day', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever') as $value => $label): ?>
 								<option value="<?php echo esc_attr($value); ?>" <?php selected($settings['retention'], $value); ?>><?php echo esc_html($label); ?></option>
 							<?php endforeach; ?>
 						</select>

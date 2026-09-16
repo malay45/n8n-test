@@ -97,7 +97,7 @@ class BG_Settings {
 			? sanitize_textarea_field( wp_unslash( $input['path_rules'] ) )
 			: '';
 
-		$allowed_retention = array( '30', '90', '180', '365', 'forever' );
+		$allowed_retention = array( '1', '30', '90', '180', '365', 'forever' );
 		$clean['retention'] = ( isset( $input['retention'] ) && in_array( $input['retention'], $allowed_retention, true ) )
 			? $input['retention']
 			: '90';
