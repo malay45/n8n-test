@@ -31,6 +31,7 @@
 	var intentionalHide = false;
 	var rescheduleTimer = null;
 	var reconnectPollTimer = null;
+	var pausedMedia = []; // Stores media elements paused by the gate so they can be resumed.
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|splitcam|software engine|manycam|droidcam/i;
@@ -106,6 +107,11 @@
 		startBtn.disabled = false;
 		startBtn.hidden = false;
 
+		var bypassBtn = overlayEl.querySelector('.bg-gate-dev-bypass-btn');
+		if (bypassBtn) {
+			bypassBtn.disabled = false;
+		}
+
 		if (!isBlockingShell) {
 			document.documentElement.classList.add('bg-gate-blur-active');
 			pauseAllMedia();
@@ -116,6 +122,7 @@
 		intentionalHide = true;
 		overlayEl.hidden = true;
 		document.documentElement.classList.remove('bg-gate-blur-active');
+		resumeAllMedia(); // Restore media state
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
@@ -147,14 +154,33 @@
 	}
 
 	// ---------------------------------------------------------------------
-	// Universal media pausing (spec #4) — generic <video> + postMessage() to iframes only,
-	// no PrestoPlayer/YouTube/Vimeo-specific selectors.
+	// Universal media pausing (spec #4 & #5) — generic <video>, PrestoPlayer custom elements,
+	// and postMessage() to iframes.
 	// ---------------------------------------------------------------------
 
 	function pauseAllMedia() {
-		document.querySelectorAll('video').forEach(function (v) {
+		pausedMedia = []; // Reset on new lockout
+
+		// Target generic video and all known PrestoPlayer web components
+		var mediaElements = document.querySelectorAll('video, audio, presto-player, presto-youtube, presto-vimeo, presto-video, presto-audio, presto-bunny');
+
+		mediaElements.forEach(function (el) {
 			try {
-				v.pause();
+				// For native HTML5 elements
+				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
+
+				// For PrestoPlayer/Plyr wrappers, they often reflect their state or have a playing property.
+				// If we can't be strictly sure (web components), we check if they have a pause method and attempt it.
+				// But to safely resume, we only push if they are actually playing.
+				var isPrestoPlaying = el.classList && (el.classList.contains('plyr--playing') || el.querySelector('.plyr--playing'));
+
+				if (isPlaying || isPrestoPlaying) {
+					pausedMedia.push(el);
+				}
+
+				if (typeof el.pause === 'function') {
+					el.pause();
+				}
 			} catch (e) { /* noop */ }
 		});
 
@@ -166,6 +192,17 @@
 				frame.contentWindow.postMessage(JSON.stringify({ method: 'pause' }), '*');
 			} catch (e) { /* Cross-origin frames that reject postMessage shape are simply skipped. */ }
 		});
+	}
+
+	function resumeAllMedia() {
+		pausedMedia.forEach(function (el) {
+			try {
+				if (typeof el.play === 'function') {
+					el.play();
+				}
+			} catch (e) { /* noop */ }
+		});
+		pausedMedia = [];
 	}
 
 	// ---------------------------------------------------------------------

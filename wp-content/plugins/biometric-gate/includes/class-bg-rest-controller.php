@@ -112,6 +112,17 @@ class BG_Rest_Controller {
 		return true;
 	}
 
+	public static function require_admin_user( WP_REST_Request $request ) {
+		$res = self::require_logged_in_user( $request );
+		if ( is_wp_error( $res ) ) {
+			return $res;
+		}
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return new WP_Error( 'bg_forbidden', __( 'Admin only.', 'biometric-gate' ), array( 'status' => 403 ) );
+		}
+		return true;
+	}
+
 	/**
 	 * Mint a one-time, 60-second scan ticket. Also reports the server-authoritative remaining
 	 * guard-window time so the frontend can skip the camera entirely on a rapid page transition
@@ -192,6 +203,20 @@ class BG_Rest_Controller {
 			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 401 ) );
 		}
 
+		BG_Session::mark_verified( $user_id );
+		self::log( $user_id, 'success', $request );
+
+		return new WP_REST_Response(
+			array(
+				'status'                => 'success',
+				'seconds_until_rescan'  => self::seconds_until_rescan( $user_id ),
+			),
+			200
+		);
+	}
+
+	public static function dev_bypass( WP_REST_Request $request ) {
+		$user_id = get_current_user_id();
 		BG_Session::mark_verified( $user_id );
 		self::log( $user_id, 'success', $request );
 
