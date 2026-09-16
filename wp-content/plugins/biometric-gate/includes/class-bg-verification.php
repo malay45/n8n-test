@@ -38,12 +38,12 @@ class BG_Verification {
 			return new WP_Error( 'bg_no_reference', __( 'No biometric reference is on file for this account.', 'biometric-gate' ) );
 		}
 
-		if ( ! defined( 'BIOMETRIC_GATE_FACEIO_SECRET_KEY' ) || '' === BIOMETRIC_GATE_FACEIO_SECRET_KEY ) {
-			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO secret key is not configured in wp-config.php.', 'biometric-gate' ) );
+		if ( '' === BG_Settings::get_faceio_secret_key() ) {
+			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO secret key is not configured in settings.', 'biometric-gate' ) );
 		}
 
-		if ( ! defined( 'BIOMETRIC_GATE_FACEIO_APP_ID' ) || '' === BIOMETRIC_GATE_FACEIO_APP_ID ) {
-			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO application ID is not configured in wp-config.php.', 'biometric-gate' ) );
+		if ( '' === BG_Settings::get_faceio_app_id() ) {
+			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO application ID is not configured in settings.', 'biometric-gate' ) );
 		}
 
 		$response = wp_remote_post(
@@ -54,8 +54,8 @@ class BG_Verification {
 				'body'    => wp_json_encode(
 					array(
 						// Secret key stays server-side only — never sent to the browser (screening Q2).
-						'application_id' => BIOMETRIC_GATE_FACEIO_APP_ID,
-						'secret_key'     => BIOMETRIC_GATE_FACEIO_SECRET_KEY,
+						'application_id' => BG_Settings::get_faceio_app_id(),
+						'secret_key'     => BG_Settings::get_faceio_secret_key(),
 						'image1'         => base64_encode( $reference ),
 						'image2'         => base64_encode( $live_frame_binary ),
 					)

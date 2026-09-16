@@ -43,18 +43,21 @@ class BG_Admin_Page {
 			return;
 		}
 
-		$required = array(
-			'BIOMETRIC_GATE_ENCRYPTION_KEY'   => __( 'used to encrypt stored reference portraits', 'biometric-gate' ),
-			'BIOMETRIC_GATE_PIXLAB_API_KEY'   => __( 'used for ID-photo face cropping', 'biometric-gate' ),
-			'BIOMETRIC_GATE_FACEIO_APP_ID'    => __( 'used to call FACEIO\'s face-verify REST API', 'biometric-gate' ),
-			'BIOMETRIC_GATE_FACEIO_SECRET_KEY' => __( 'used to call FACEIO\'s face-verify REST API', 'biometric-gate' ),
-		);
+		
 
 		$missing = array();
-		foreach ( $required as $constant => $reason ) {
-			if ( ! defined( $constant ) || '' === constant( $constant ) ) {
-				$missing[] = "<code>{$constant}</code> ({$reason})";
-			}
+
+		if ( ! defined( 'BIOMETRIC_GATE_ENCRYPTION_KEY' ) || '' === constant( 'BIOMETRIC_GATE_ENCRYPTION_KEY' ) ) {
+			$missing[] = "<code>BIOMETRIC_GATE_ENCRYPTION_KEY</code> (" . __( 'used to encrypt stored reference portraits, must be in wp-config.php', 'biometric-gate' ) . ")";
+		}
+		if ( '' === BG_Settings::get_pixlab_api_key() ) {
+			$missing[] = "<code>PixLab API Key</code> (" . __( 'used for ID-photo face cropping, must be set in Global Settings', 'biometric-gate' ) . ")";
+		}
+		if ( '' === BG_Settings::get_faceio_app_id() ) {
+			$missing[] = "<code>FACEIO App ID</code> (" . __( 'used to call FACEIO\'s face-verify REST API, must be set in Global Settings', 'biometric-gate' ) . ")";
+		}
+		if ( '' === BG_Settings::get_faceio_secret_key() ) {
+			$missing[] = "<code>FACEIO Secret Key</code> (" . __( 'used to call FACEIO\'s face-verify REST API, must be set in Global Settings', 'biometric-gate' ) . ")";
 		}
 
 		if ( empty( $missing ) ) {
@@ -168,6 +171,9 @@ class BG_Admin_Page {
 				'path_rules'          => isset( $_POST['path_rules'] ) ? wp_unslash( $_POST['path_rules'] ) : '',
 				'retention'           => isset( $_POST['retention'] ) ? wp_unslash( $_POST['retention'] ) : '90',
 				'no_camera_message'   => isset( $_POST['no_camera_message'] ) ? wp_unslash( $_POST['no_camera_message'] ) : '',
+				'pixlab_api_key'      => isset( $_POST['pixlab_api_key'] ) ? wp_unslash( $_POST['pixlab_api_key'] ) : '',
+				'faceio_app_id'       => isset( $_POST['faceio_app_id'] ) ? wp_unslash( $_POST['faceio_app_id'] ) : '',
+				'faceio_secret_key'   => isset( $_POST['faceio_secret_key'] ) ? wp_unslash( $_POST['faceio_secret_key'] ) : '',
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -237,6 +243,24 @@ class BG_Admin_Page {
 							)
 						);
 						?>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="pixlab_api_key"><?php esc_html_e( 'PixLab API Key', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="text" name="pixlab_api_key" id="pixlab_api_key" value="<?php echo esc_attr( BG_Settings::get_pixlab_api_key() ); ?>" class="regular-text" />
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="faceio_app_id"><?php esc_html_e( 'FACEIO App ID', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="text" name="faceio_app_id" id="faceio_app_id" value="<?php echo esc_attr( BG_Settings::get_faceio_app_id() ); ?>" class="regular-text" />
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="faceio_secret_key"><?php esc_html_e( 'FACEIO Secret Key', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="password" name="faceio_secret_key" id="faceio_secret_key" value="<?php echo esc_attr( BG_Settings::get_faceio_secret_key() ); ?>" class="regular-text" />
 					</td>
 				</tr>
 			</table>

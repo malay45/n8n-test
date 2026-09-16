@@ -3,79 +3,73 @@
  * Tab B is a conventional server-rendered settings form (see class-bg-admin-page.php) and
  * needs no JS here. Vanilla JS, no build step, talks only to this plugin's own REST routes.
  */
-( function () {
+(function () {
 	'use strict';
 
-	if ( typeof window.BiometricGateAdmin === 'undefined' ) {
+	if (typeof window.BiometricGateAdmin === 'undefined') {
 		return;
 	}
 
 	var cfg = window.BiometricGateAdmin;
-	var root = document.getElementById( 'bg-admin-root' );
+	var root = document.getElementById('bg-admin-root');
 
-	if ( ! root ) {
+	if (!root) {
 		return;
 	}
 
-	if ( 'a' === cfg.tab ) {
-		renderUsersTab();
-	} else if ( 'c' === cfg.tab ) {
-		renderLogsTab();
-	}
-
-	function apiFetch( path, opts ) {
+	function apiFetch(path, opts) {
 		opts = opts || {};
-		var headers = Object.assign( { 'X-WP-Nonce': cfg.nonce }, opts.headers || {} );
+		var headers = Object.assign({ 'X-WP-Nonce': cfg.nonce }, opts.headers || {});
 
-		if ( opts.body && ! ( opts.body instanceof FormData ) ) {
-			headers[ 'Content-Type' ] = 'application/json';
-			opts.body = JSON.stringify( opts.body );
+		if (opts.body && !(opts.body instanceof FormData)) {
+			headers['Content-Type'] = 'application/json';
+			opts.body = JSON.stringify(opts.body);
 		}
 
-		return fetch( cfg.restUrl + path, Object.assign( { credentials: 'same-origin' }, opts, { headers: headers } ) )
-			.then( function ( response ) {
-				return response.json().catch( function () {
+		return fetch(cfg.restUrl + path, Object.assign({ credentials: 'same-origin' }, opts, { headers: headers }))
+			.then(function (response) {
+				return response.json().catch(function () {
 					return {};
-				} ).then( function ( json ) {
-					if ( ! response.ok ) {
-						var err = new Error( json.message || 'Request failed' );
+				}).then(function (json) {
+					if (!response.ok) {
+						var err = new Error(json.message || 'Request failed');
 						err.code = json.code;
 						throw err;
 					}
 					return json;
-				} );
-			} );
+				});
+			});
 	}
 
-	function debounce( fn, wait ) {
+	function debounce(fn, wait) {
 		var timer;
 		return function () {
 			var args = arguments;
-			window.clearTimeout( timer );
-			timer = window.setTimeout( function () {
-				fn.apply( null, args );
-			}, wait );
+			window.clearTimeout(timer);
+			timer = window.setTimeout(function () {
+				fn.apply(null, args);
+			}, wait);
 		};
 	}
 
-	function td( text ) {
-		var cell = document.createElement( 'td' );
+	function td(text) {
+		var cell = document.createElement('td');
 		cell.textContent = text;
 		return cell;
 	}
 
-	function showError( err ) {
-		window.alert( ( err && err.message ) || 'Something went wrong.' );
+	function showError(err) {
+		window.alert((err && err.message) || 'Something went wrong.');
 	}
 
-	function humanSize( bytes ) {
-		if ( bytes < 1024 ) {
+	function humanSize(bytes) {
+		if (bytes < 1024) {
 			return bytes + ' B';
 		}
-		if ( bytes < 1024 * 1024 ) {
-			return ( bytes / 1024 ).toFixed( 1 ) + ' KB';
+		if (bytes < 1024 * 1024) {
+			return (bytes / 1024).toFixed(1) + ' KB';
 		}
-		return ( bytes / 1024 / 1024 ).toFixed( 1 ) + ' MB';
+		return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 	}
 
 	// ---------------------------------------------------------------------
@@ -89,154 +83,154 @@
 			'<th>Name</th><th>Email</th><th>Status</th><th>Upload ID Photo</th><th>Enabled</th><th>Actions</th>' +
 			'</tr></thead><tbody id="bg-user-rows"></tbody></table>';
 
-		document.getElementById( 'bg-user-search' ).addEventListener(
+		document.getElementById('bg-user-search').addEventListener(
 			'input',
-			debounce( function ( e ) {
-				loadUsers( e.target.value );
-			}, 300 )
+			debounce(function (e) {
+				loadUsers(e.target.value);
+			}, 300)
 		);
 
-		loadUsers( '' );
+		loadUsers('');
 	}
 
-	function loadUsers( search ) {
-		apiFetch( '/admin/users?search=' + encodeURIComponent( search ) ).then( renderUserRows ).catch( showError );
+	function loadUsers(search) {
+		apiFetch('/admin/users?search=' + encodeURIComponent(search)).then(renderUserRows).catch(showError);
 	}
 
-	function renderUserRows( users ) {
-		var tbody = document.getElementById( 'bg-user-rows' );
+	function renderUserRows(users) {
+		var tbody = document.getElementById('bg-user-rows');
 		tbody.innerHTML = '';
 
-		users.forEach( function ( u ) {
-			var tr = document.createElement( 'tr' );
+		users.forEach(function (u) {
+			var tr = document.createElement('tr');
 
-			var nameTd = document.createElement( 'td' );
-			var nameLink = document.createElement( 'a' );
+			var nameTd = document.createElement('td');
+			var nameLink = document.createElement('a');
 			nameLink.href = cfg.logsTabUrl + '&user_id=' + u.id;
 			nameLink.textContent = u.name;
-			nameTd.appendChild( nameLink );
-			tr.appendChild( nameTd );
+			nameTd.appendChild(nameLink);
+			tr.appendChild(nameTd);
 
-			tr.appendChild( td( u.email ) );
+			tr.appendChild(td(u.email));
 
-			var statusTd = td( u.locked ? cfg.i18n.locked : ( u.has_enrollment ? cfg.i18n.idTokenLoaded : cfg.i18n.idMissing ) );
-			tr.appendChild( statusTd );
+			var statusTd = td(u.locked ? cfg.i18n.locked : (u.has_enrollment ? cfg.i18n.idTokenLoaded : cfg.i18n.idMissing));
+			tr.appendChild(statusTd);
 
-			var uploadTd = document.createElement( 'td' );
-			var fileInput = document.createElement( 'input' );
+			var uploadTd = document.createElement('td');
+			var fileInput = document.createElement('input');
 			fileInput.type = 'file';
 			fileInput.accept = 'image/jpeg,image/png';
-			var uploadBtn = document.createElement( 'button' );
+			var uploadBtn = document.createElement('button');
 			uploadBtn.type = 'button';
 			uploadBtn.className = 'button';
 			uploadBtn.textContent = 'Upload';
-			uploadBtn.addEventListener( 'click', function () {
-				uploadIdPhoto( u.id, fileInput, statusTd );
-			} );
-			uploadTd.appendChild( fileInput );
-			uploadTd.appendChild( uploadBtn );
-			tr.appendChild( uploadTd );
+			uploadBtn.addEventListener('click', function () {
+				uploadIdPhoto(u.id, fileInput, statusTd);
+			});
+			uploadTd.appendChild(fileInput);
+			uploadTd.appendChild(uploadBtn);
+			tr.appendChild(uploadTd);
 
-			var enabledTd = document.createElement( 'td' );
-			var toggle = document.createElement( 'input' );
+			var enabledTd = document.createElement('td');
+			var toggle = document.createElement('input');
 			toggle.type = 'checkbox';
-			toggle.checked = ! u.bypass;
-			toggle.addEventListener( 'change', function () {
-				apiFetch( '/admin/toggle-gate-user', { method: 'POST', body: { user_id: u.id, enabled: toggle.checked } } )
-					.catch( function ( err ) {
-						toggle.checked = ! toggle.checked;
-						showError( err );
-					} );
-			} );
-			enabledTd.appendChild( toggle );
-			tr.appendChild( enabledTd );
+			toggle.checked = !u.bypass;
+			toggle.addEventListener('change', function () {
+				apiFetch('/admin/toggle-gate-user', { method: 'POST', body: { user_id: u.id, enabled: toggle.checked } })
+					.catch(function (err) {
+						toggle.checked = !toggle.checked;
+						showError(err);
+					});
+			});
+			enabledTd.appendChild(toggle);
+			tr.appendChild(enabledTd);
 
-			var actionsTd = document.createElement( 'td' );
-			var resetBtn = document.createElement( 'button' );
+			var actionsTd = document.createElement('td');
+			var resetBtn = document.createElement('button');
 			resetBtn.type = 'button';
 			resetBtn.className = 'button';
 			resetBtn.textContent = 'Reset Biometrics';
-			resetBtn.addEventListener( 'click', function () {
-				if ( ! window.confirm( cfg.i18n.confirmReset ) ) {
+			resetBtn.addEventListener('click', function () {
+				if (!window.confirm(cfg.i18n.confirmReset)) {
 					return;
 				}
-				apiFetch( '/admin/reset', { method: 'POST', body: { user_id: u.id } } )
-					.then( function () {
-						loadUsers( document.getElementById( 'bg-user-search' ).value );
-					} )
-					.catch( showError );
-			} );
+				apiFetch('/admin/reset', { method: 'POST', body: { user_id: u.id } })
+					.then(function () {
+						loadUsers(document.getElementById('bg-user-search').value);
+					})
+					.catch(showError);
+			});
 
-			var exportBtn = document.createElement( 'button' );
+			var exportBtn = document.createElement('button');
 			exportBtn.type = 'button';
 			exportBtn.className = 'button';
 			exportBtn.textContent = 'Export Student History';
-			exportBtn.addEventListener( 'click', function () {
-				exportUserHistory( u.id, exportBtn );
-			} );
+			exportBtn.addEventListener('click', function () {
+				exportUserHistory(u.id, exportBtn);
+			});
 
-			actionsTd.appendChild( resetBtn );
-			actionsTd.appendChild( document.createTextNode( ' ' ) );
-			actionsTd.appendChild( exportBtn );
-			tr.appendChild( actionsTd );
+			actionsTd.appendChild(resetBtn);
+			actionsTd.appendChild(document.createTextNode(' '));
+			actionsTd.appendChild(exportBtn);
+			tr.appendChild(actionsTd);
 
-			tbody.appendChild( tr );
-		} );
+			tbody.appendChild(tr);
+		});
 	}
 
-	function uploadIdPhoto( userId, fileInput, statusCell ) {
-		if ( ! fileInput.files || ! fileInput.files[ 0 ] ) {
-			window.alert( 'Choose a file first.' );
+	function uploadIdPhoto(userId, fileInput, statusCell) {
+		if (!fileInput.files || !fileInput.files[0]) {
+			window.alert('Choose a file first.');
 			return;
 		}
 
 		var formData = new FormData();
-		formData.append( 'user_id', userId );
-		formData.append( 'id_photo', fileInput.files[ 0 ] );
+		formData.append('user_id', userId);
+		formData.append('id_photo', fileInput.files[0]);
 
-		apiFetch( '/admin/enroll', { method: 'POST', body: formData } )
-			.then( function () {
-				if ( statusCell ) {
+		apiFetch('/admin/enroll', { method: 'POST', body: formData })
+			.then(function () {
+				if (statusCell) {
 					statusCell.textContent = cfg.i18n.idTokenLoaded;
 				}
-			} )
-			.catch( showError );
+			})
+			.catch(showError);
 	}
 
-	function exportUserHistory( userId, btn ) {
+	function exportUserHistory(userId, btn) {
 		btn.disabled = true;
 		var originalLabel = btn.textContent;
 
-		apiFetch( '/admin/export-user', { method: 'POST', body: { user_id: userId } } )
-			.then( function ( res ) {
-				pollProgress( res.progress_key, btn, originalLabel );
-			} )
-			.catch( function ( err ) {
+		apiFetch('/admin/export-user', { method: 'POST', body: { user_id: userId } })
+			.then(function (res) {
+				pollProgress(res.progress_key, btn, originalLabel);
+			})
+			.catch(function (err) {
 				btn.disabled = false;
-				showError( err );
-			} );
+				showError(err);
+			});
 	}
 
-	function pollProgress( key, btn, originalLabel ) {
+	function pollProgress(key, btn, originalLabel) {
 		btn.textContent = cfg.i18n.exporting;
 
-		var interval = window.setInterval( function () {
-			apiFetch( '/admin/export-progress?key=' + encodeURIComponent( key ) )
-				.then( function ( progress ) {
-					if ( 'done' === progress.status ) {
-						window.clearInterval( interval );
+		var interval = window.setInterval(function () {
+			apiFetch('/admin/export-progress?key=' + encodeURIComponent(key))
+				.then(function (progress) {
+					if ('done' === progress.status) {
+						window.clearInterval(interval);
 						btn.disabled = false;
 						btn.textContent = originalLabel;
-						var url = cfg.downloadBaseUrl + '?action=bg_download_backup&file=' + encodeURIComponent( progress.file ) + '&_wpnonce=' + cfg.downloadNonce;
+						var url = cfg.downloadBaseUrl + '?action=bg_download_backup&file=' + encodeURIComponent(progress.file) + '&_wpnonce=' + cfg.downloadNonce;
 						window.location.href = url;
 					}
-				} )
-				.catch( function () {
-					window.clearInterval( interval );
+				})
+				.catch(function () {
+					window.clearInterval(interval);
 					btn.disabled = false;
 					btn.textContent = originalLabel;
-				} );
-		}, 1500 );
+				});
+		}, 1500);
 	}
 
 	// ---------------------------------------------------------------------
@@ -256,7 +250,7 @@
 			'<div class="bg-admin-toolbar">' +
 			'<input type="search" id="bg-log-search" placeholder="Search by user name…" class="regular-text">' +
 			'<button type="button" class="button" id="bg-log-sort-toggle">Toggle Name / Time Sort</button>' +
-			( logsState.user_id ? '<button type="button" class="button" id="bg-log-clear-filter">Clear User Filter</button>' : '' ) +
+			(logsState.user_id ? '<button type="button" class="button" id="bg-log-clear-filter">Clear User Filter</button>' : '') +
 			'<button type="button" class="button button-primary" id="bg-export-wipe">Export &amp; Wipe Live Logs</button>' +
 			'<span id="bg-export-wipe-status"></span>' +
 			'</div>' +
@@ -265,162 +259,168 @@
 			'<h2>Server Document Archive</h2>' +
 			'<table class="widefat striped"><thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody id="bg-backup-rows"></tbody></table>';
 
-		document.getElementById( 'bg-log-search' ).addEventListener(
+		document.getElementById('bg-log-search').addEventListener(
 			'input',
-			debounce( function ( e ) {
+			debounce(function (e) {
 				logsState.search = e.target.value;
 				logsState.page = 1;
 				loadLogs();
-			}, 300 )
+			}, 300)
 		);
 
-		document.getElementById( 'bg-log-sort-toggle' ).addEventListener( 'click', function () {
+		document.getElementById('bg-log-sort-toggle').addEventListener('click', function () {
 			logsState.orderby = 'time' === logsState.orderby ? 'name' : 'time';
 			loadLogs();
-		} );
+		});
 
-		var clearBtn = document.getElementById( 'bg-log-clear-filter' );
-		if ( clearBtn ) {
-			clearBtn.addEventListener( 'click', function () {
+		var clearBtn = document.getElementById('bg-log-clear-filter');
+		if (clearBtn) {
+			clearBtn.addEventListener('click', function () {
 				window.location.href = cfg.logsTabUrl;
-			} );
+			});
 		}
 
-		document.getElementById( 'bg-export-wipe' ).addEventListener( 'click', onExportWipeClick );
+		document.getElementById('bg-export-wipe').addEventListener('click', onExportWipeClick);
 
 		loadLogs();
 		loadBackups();
 	}
 
 	function loadLogs() {
-		var qs = new URLSearchParams( {
+		var qs = new URLSearchParams({
 			search: logsState.search,
 			user_id: logsState.user_id,
 			orderby: logsState.orderby,
 			order: logsState.order,
 			page: logsState.page,
-		} ).toString();
+		}).toString();
 
-		apiFetch( '/admin/logs?' + qs ).then( renderLogRows ).catch( showError );
+		apiFetch('/admin/logs?' + qs).then(renderLogRows).catch(showError);
 	}
 
-	function renderLogRows( result ) {
-		var tbody = document.getElementById( 'bg-log-rows' );
+	function renderLogRows(result) {
+		var tbody = document.getElementById('bg-log-rows');
 		tbody.innerHTML = '';
 
-		result.rows.forEach( function ( row ) {
-			var tr = document.createElement( 'tr' );
-			tr.appendChild( td( row.created_at ) );
+		result.rows.forEach(function (row) {
+			var tr = document.createElement('tr');
+			tr.appendChild(td(row.created_at));
 
-			var nameTd = document.createElement( 'td' );
-			var link = document.createElement( 'a' );
+			var nameTd = document.createElement('td');
+			var link = document.createElement('a');
 			link.href = cfg.logsTabUrl + '&user_id=' + row.user_id;
-			link.textContent = row.display_name || ( 'User #' + row.user_id );
-			nameTd.appendChild( link );
-			tr.appendChild( nameTd );
+			link.textContent = row.display_name || ('User #' + row.user_id);
+			nameTd.appendChild(link);
+			tr.appendChild(nameTd);
 
-			tr.appendChild( td( row.scan_status ) );
-			tr.appendChild( td( row.page_title || row.page_url ) );
+			tr.appendChild(td(row.scan_status));
+			tr.appendChild(td(row.page_title || row.page_url));
 
-			tbody.appendChild( tr );
-		} );
+			tbody.appendChild(tr);
+		});
 
-		renderPagination( result.total );
+		renderPagination(result.total);
 	}
 
-	function renderPagination( total ) {
+	function renderPagination(total) {
 		var perPage = 50;
-		var totalPages = Math.max( 1, Math.ceil( total / perPage ) );
-		var el = document.getElementById( 'bg-log-pagination' );
+		var totalPages = Math.max(1, Math.ceil(total / perPage));
+		var el = document.getElementById('bg-log-pagination');
 		el.innerHTML = '';
-		el.appendChild( document.createTextNode( 'Page ' + logsState.page + ' of ' + totalPages + ' (' + total + ' rows) ' ) );
+		el.appendChild(document.createTextNode('Page ' + logsState.page + ' of ' + totalPages + ' (' + total + ' rows) '));
 
-		var prev = document.createElement( 'button' );
+		var prev = document.createElement('button');
 		prev.type = 'button';
 		prev.className = 'button';
 		prev.textContent = 'Prev';
 		prev.disabled = logsState.page <= 1;
-		prev.addEventListener( 'click', function () {
+		prev.addEventListener('click', function () {
 			logsState.page--;
 			loadLogs();
-		} );
+		});
 
-		var next = document.createElement( 'button' );
+		var next = document.createElement('button');
 		next.type = 'button';
 		next.className = 'button';
 		next.textContent = 'Next';
 		next.disabled = logsState.page >= totalPages;
-		next.addEventListener( 'click', function () {
+		next.addEventListener('click', function () {
 			logsState.page++;
 			loadLogs();
-		} );
+		});
 
-		el.appendChild( prev );
-		el.appendChild( document.createTextNode( ' ' ) );
-		el.appendChild( next );
+		el.appendChild(prev);
+		el.appendChild(document.createTextNode(' '));
+		el.appendChild(next);
 	}
 
 	function onExportWipeClick() {
-		if ( ! window.confirm( cfg.i18n.confirmExportWipe ) ) {
+		if (!window.confirm(cfg.i18n.confirmExportWipe)) {
 			return;
 		}
 
-		var status = document.getElementById( 'bg-export-wipe-status' );
+		var status = document.getElementById('bg-export-wipe-status');
 		status.textContent = cfg.i18n.exporting;
 
-		apiFetch( '/admin/export-wipe', { method: 'POST' } )
-			.then( function () {
-				var interval = window.setInterval( function () {
-					apiFetch( '/admin/export-progress' ).then( function ( progress ) {
-						if ( 'done' === progress.status ) {
-							window.clearInterval( interval );
+		apiFetch('/admin/export-wipe', { method: 'POST' })
+			.then(function () {
+				var interval = window.setInterval(function () {
+					apiFetch('/admin/export-progress').then(function (progress) {
+						if ('done' === progress.status) {
+							window.clearInterval(interval);
 							status.textContent = cfg.i18n.done;
 							loadLogs();
 							loadBackups();
 						}
-					} );
-				}, 1500 );
-			} )
-			.catch( showError );
+					});
+				}, 1500);
+			})
+			.catch(showError);
 	}
 
 	function loadBackups() {
-		apiFetch( '/admin/backups' ).then( renderBackupRows ).catch( showError );
+		apiFetch('/admin/backups').then(renderBackupRows).catch(showError);
 	}
 
-	function renderBackupRows( files ) {
-		var tbody = document.getElementById( 'bg-backup-rows' );
+	function renderBackupRows(files) {
+		var tbody = document.getElementById('bg-backup-rows');
 		tbody.innerHTML = '';
 
-		files.forEach( function ( f ) {
-			var tr = document.createElement( 'tr' );
-			tr.appendChild( td( f.name ) );
-			tr.appendChild( td( humanSize( f.size ) ) );
-			tr.appendChild( td( new Date( f.modified * 1000 ).toLocaleString() ) );
+		files.forEach(function (f) {
+			var tr = document.createElement('tr');
+			tr.appendChild(td(f.name));
+			tr.appendChild(td(humanSize(f.size)));
+			tr.appendChild(td(new Date(f.modified * 1000).toLocaleString()));
 
-			var actionsTd = document.createElement( 'td' );
-			var dl = document.createElement( 'a' );
+			var actionsTd = document.createElement('td');
+			var dl = document.createElement('a');
 			dl.className = 'button';
 			dl.textContent = 'Download';
-			dl.href = cfg.downloadBaseUrl + '?action=bg_download_backup&file=' + encodeURIComponent( f.name ) + '&_wpnonce=' + cfg.downloadNonce;
+			dl.href = cfg.downloadBaseUrl + '?action=bg_download_backup&file=' + encodeURIComponent(f.name) + '&_wpnonce=' + cfg.downloadNonce;
 
-			var del = document.createElement( 'button' );
+			var del = document.createElement('button');
 			del.type = 'button';
 			del.className = 'button';
 			del.textContent = 'Delete';
-			del.addEventListener( 'click', function () {
-				if ( ! window.confirm( cfg.i18n.confirmDeleteFile ) ) {
+			del.addEventListener('click', function () {
+				if (!window.confirm(cfg.i18n.confirmDeleteFile)) {
 					return;
 				}
-				apiFetch( '/admin/backups/delete', { method: 'POST', body: { file: f.name } } ).then( loadBackups ).catch( showError );
-			} );
+				apiFetch('/admin/backups/delete', { method: 'POST', body: { file: f.name } }).then(loadBackups).catch(showError);
+			});
 
-			actionsTd.appendChild( dl );
-			actionsTd.appendChild( document.createTextNode( ' ' ) );
-			actionsTd.appendChild( del );
-			tr.appendChild( actionsTd );
+			actionsTd.appendChild(dl);
+			actionsTd.appendChild(document.createTextNode(' '));
+			actionsTd.appendChild(del);
+			tr.appendChild(actionsTd);
 
-			tbody.appendChild( tr );
-		} );
+			tbody.appendChild(tr);
+		});
 	}
-} )();
+
+	if ('a' === cfg.tab) {
+		renderUsersTab();
+	} else if ('c' === cfg.tab) {
+		renderLogsTab();
+	}
+})();

@@ -75,6 +75,20 @@ class BG_Rest_Controller {
 				'permission_callback' => array( __CLASS__, 'require_logged_in_user' ),
 			)
 		);
+
+		register_rest_route(
+			BG_REST_NAMESPACE,
+			'/scan/dev-bypass',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'dev_bypass' ),
+				'permission_callback' => array( __CLASS__, 'require_admin_user' ),
+				'args'                => array(
+					'page_title' => array( 'type' => 'string', 'required' => false ),
+					'page_url'   => array( 'type' => 'string', 'required' => false ),
+				),
+			)
+		);
 	}
 
 	public static function require_logged_in_user( WP_REST_Request $request ) {
