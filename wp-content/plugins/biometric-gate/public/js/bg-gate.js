@@ -317,23 +317,27 @@
 
 		return new Promise(function (resolve) {
 			videoEl.onloadeddata = function () {
-				var ctx = canvasEl.getContext('2d');
-				ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
-				var base64 = dataUrl.split(',')[1] || '';
+				// Wait 3 seconds so the user can actually see their face in the circle
+				// before the plugin snaps the photo and turns the camera off.
+				window.setTimeout(function () {
+					var ctx = canvasEl.getContext('2d');
+					ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+					var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
+					var base64 = dataUrl.split(',')[1] || '';
 
-				stopStream(stream);
+					stopStream(stream);
 
-				resolve(
-					apiPost('/scan/result', {
-						ticket: currentTicket,
-						frame: base64,
-						page_title: config.pageTitle,
-						page_url: config.pageUrl,
-					})
-						.then(handleScanSuccess)
-						.catch(handleScanError)
-				);
+					resolve(
+						apiPost('/scan/result', {
+							ticket: currentTicket,
+							frame: base64,
+							page_title: config.pageTitle,
+							page_url: config.pageUrl,
+						})
+							.then(handleScanSuccess)
+							.catch(handleScanError)
+					);
+				}, 3000);
 			};
 		});
 	}
