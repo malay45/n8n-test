@@ -31,58 +31,14 @@ class BG_Verification {
 	 *                        FACEIO-side timeout/5xx (spec #5's one-loop grace bypass applies to
 	 *                        that case only); any other WP_Error means a genuine non-match/failure.
 	 */
-	public static function verify_against_reference( $user_id, $live_frame_binary ) {
-		$reference = BG_Enrollment::get_reference_portrait( $user_id );
+	public static function verify_against_reference( $user_id, $submitted_facial_id ) {
+		$reference_id = BG_Enrollment::get_reference_portrait( $user_id );
 
-		if ( null === $reference ) {
+		if ( empty( $reference_id ) ) {
 			return new WP_Error( 'bg_no_reference', __( 'No biometric reference is on file for this account.', 'biometric-gate' ) );
 		}
 
-		if ( '' === BG_Settings::get_faceio_secret_key() ) {
-			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO secret key is not configured in settings.', 'biometric-gate' ) );
-		}
-
-		if ( '' === BG_Settings::get_faceio_app_id() ) {
-			return new WP_Error( 'bg_faceio_not_configured', __( 'FACEIO application ID is not configured in settings.', 'biometric-gate' ) );
-		}
-
-		$response = wp_remote_post(
-			self::FACEIO_VERIFY_ENDPOINT,
-			array(
-				'timeout' => self::CLOUD_TIMEOUT_SECONDS,
-				'headers' => array( 'Content-Type' => 'application/json' ),
-				'body'    => wp_json_encode(
-					array(
-						// Secret key stays server-side only — never sent to the browser (screening Q2).
-						'application_id' => BG_Settings::get_faceio_app_id(),
-						'secret_key'     => BG_Settings::get_faceio_secret_key(),
-						'image1'         => base64_encode( $reference ),
-						'image2'         => base64_encode( $live_frame_binary ),
-					)
-				),
-			)
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return new WP_Error( 'bg_cloud_timeout', __( 'FACEIO service did not respond in time.', 'biometric-gate' ) );
-		}
-
-		$http_code = wp_remote_retrieve_response_code( $response );
-
-		if ( $http_code >= 500 ) {
-			return new WP_Error( 'bg_cloud_timeout', __( 'FACEIO service returned a server error.', 'biometric-gate' ) );
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-		// Assumed contract: {"status":200,"result":{"is_identical":true,"confidence":0.93}} per
-		// FACEIO's documented face-verify response shape. Treat any deviation as a hard failure
-		// (fail closed) rather than guessing at a field name.
-		if ( ! is_array( $body ) || ! isset( $body['result']['is_identical'] ) ) {
-			return new WP_Error( 'bg_unexpected_response', __( 'Unexpected response from the verification service.', 'biometric-gate' ) );
-		}
-
-		if ( true !== $body['result']['is_identical'] ) {
+		if ( $reference_id !== $submitted_facial_id ) {
 			return new WP_Error( 'bg_no_match', __( 'The live scan did not match the enrolled identity.', 'biometric-gate' ) );
 		}
 

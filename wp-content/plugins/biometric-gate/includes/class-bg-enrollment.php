@@ -69,7 +69,7 @@ class BG_Enrollment {
 
 	/**
 	 * @param int $user_id
-	 * @return string|null Decrypted, base64-decoded JPEG binary, or null if none/tampered.
+	 * @return string|null Decrypted facialId string, or null if none/tampered.
 	 */
 	public static function get_reference_portrait( $user_id ) {
 		$encrypted = get_user_meta( absint( $user_id ), self::META_REFERENCE_PORTRAIT, true );
@@ -77,15 +77,31 @@ class BG_Enrollment {
 			return null;
 		}
 
-		$decrypted_b64 = BG_Crypto::decrypt( $encrypted );
-		if ( null === $decrypted_b64 ) {
+		$decrypted_string = BG_Crypto::decrypt( $encrypted );
+		if ( null === $decrypted_string ) {
 			// Tampering detected — fail closed and lock the profile (spec #2).
 			BG_Session::lock_account( $user_id );
 			return null;
 		}
 
-		$binary = base64_decode( $decrypted_b64, true );
-		return ( false === $binary ) ? null : $binary;
+		return $decrypted_string;
+	}
+
+	/**
+	 * Save the facialId returned from fio.enroll() into the database.
+	 */
+	public static function enroll_from_frontend( $user_id, $facialId ) {
+		$user_id = absint( $user_id );
+		
+		if ( empty( $facialId ) ) {
+			return new WP_Error( 'bg_no_facialid', __( 'No facial ID was provided.', 'biometric-gate' ) );
+		}
+
+		$encrypted = BG_Crypto::encrypt( $facialId );
+		update_user_meta( $user_id, self::META_REFERENCE_PORTRAIT, $encrypted );
+		delete_user_meta( $user_id, 'bg_account_locked' ); // A fresh enrollment supersedes any prior lock.
+
+		return true;
 	}
 
 	/**
@@ -176,7 +192,6 @@ class BG_Enrollment {
 		if ( '' === BG_Settings::get_pixlab_api_key() ) {
 			return new WP_Error( 'bg_pixlab_not_configured', __( 'PixLab API key is not configured in settings.', 'biometric-gate' ) );
 		}
-
 
 		$image_data = file_get_contents( $image_path );
 		if ( false === $image_data ) {
