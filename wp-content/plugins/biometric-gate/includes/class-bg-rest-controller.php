@@ -46,9 +46,22 @@ class BG_Rest_Controller {
 				'permission_callback' => array( __CLASS__, 'require_logged_in_user' ),
 				'args'                => array(
 					'ticket'     => array( 'type' => 'string', 'required' => true ),
-					'frame'      => array( 'type' => 'string', 'required' => true ), // base64 JPEG.
+					'facialId'   => array( 'type' => 'string', 'required' => true ),
 					'page_title' => array( 'type' => 'string', 'required' => false ),
 					'page_url'   => array( 'type' => 'string', 'required' => false ),
+				),
+			)
+		);
+
+		register_rest_route(
+			BG_REST_NAMESPACE,
+			'/scan/enroll-front',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'scan_enroll_front' ),
+				'permission_callback' => array( __CLASS__, 'require_logged_in_user' ),
+				'args'                => array(
+					'facialId' => array( 'type' => 'string', 'required' => true ),
 				),
 			)
 		);
@@ -179,15 +192,14 @@ class BG_Rest_Controller {
 			return new WP_Error( 'bg_not_enrolled', __( 'No biometric profile is on file. Contact your administrator.', 'biometric-gate' ), array( 'status' => 412 ) );
 		}
 
-		$frame_b64 = (string) $request->get_param( 'frame' );
-		$frame     = base64_decode( $frame_b64, true );
+		$facialId = (string) $request->get_param( 'facialId' );
 
-		if ( false === $frame || '' === $frame ) {
+		if ( empty( $facialId ) ) {
 			self::log( $user_id, 'failure', $request );
-			return new WP_Error( 'bg_bad_frame', __( 'No usable camera frame was received.', 'biometric-gate' ), array( 'status' => 400 ) );
+			return new WP_Error( 'bg_bad_facialid', __( 'No facial ID was received.', 'biometric-gate' ), array( 'status' => 400 ) );
 		}
 
-		$result = BG_Verification::verify_against_reference( $user_id, $frame );
+		$result = BG_Verification::verify_against_reference( $user_id, $facialId );
 
 		if ( is_wp_error( $result ) ) {
 			if ( 'bg_cloud_timeout' === $result->get_error_code() ) {
@@ -213,6 +225,24 @@ class BG_Rest_Controller {
 			),
 			200
 		);
+	}
+
+	public static function scan_enroll_front( WP_REST_Request $request ) {
+		$user_id = get_current_user_id();
+		$facialId = (string) $request->get_param( 'facialId' );
+
+		if ( empty( $facialId ) ) {
+			return new WP_Error( 'bg_bad_facialid', __( 'No facial ID was received.', 'biometric-gate' ), array( 'status' => 400 ) );
+		}
+
+		$result = BG_Enrollment::enroll_from_frontend( $user_id, $facialId );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		BG_Session::mark_verified( $user_id );
+		return new WP_REST_Response( array( 'status' => 'success' ), 200 );
 	}
 
 	public static function dev_bypass( WP_REST_Request $request ) {
