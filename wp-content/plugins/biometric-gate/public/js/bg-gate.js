@@ -32,6 +32,7 @@
 	var rescheduleTimer = null;
 	var reconnectPollTimer = null;
 	var pausedMedia = [];
+	var activeStream = null;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
@@ -119,6 +120,10 @@
 		overlayEl.hidden = true;
 		document.documentElement.classList.remove('bg-gate-blur-active');
 		resumeAllMedia(); // Restore media state
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
+		}
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
@@ -217,11 +222,15 @@
 		}
 
 		startBtn.disabled = true;
-		setStatus(config.i18n.verifying);
 
-		navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
-			.then(auditDevicesThenCapture)
-			.catch(handleCameraError);
+		if (activeStream) {
+			captureAndSubmit(activeStream, false);
+		} else {
+			setStatus(config.i18n.verifying || "Starting camera...");
+			navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
+				.then(auditDevicesThenCapture)
+				.catch(handleCameraError);
+		}
 	}
 
 	function buildVideoConstraints() {
@@ -253,21 +262,23 @@
 				return;
 			}
 
-			return captureAndSubmit(stream);
+			activeStream = stream;
+			return captureAndSubmit(stream, true);
 		});
 	}
 
-	function captureAndSubmit(stream) {
-		videoEl.srcObject = stream;
+	function captureAndSubmit(stream, isFirstTime) {
+		if (isFirstTime) {
+			videoEl.srcObject = stream;
+		}
 
 		return new Promise(function (resolve) {
-			videoEl.onloadeddata = function () {
+			var takePicture = function() {
+				setStatus(config.i18n.verifying || "Verifying...");
 				var ctx = canvasEl.getContext('2d');
 				ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
 				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
 				var base64 = dataUrl.split(',')[1] || '';
-
-				stopStream(stream);
 
 				resolve(
 					apiPost('/scan/result', {
@@ -278,6 +289,24 @@
 					}).then(handleScanSuccess).catch(handleScanError)
 				);
 			};
+
+			if (isFirstTime) {
+				videoEl.onloadeddata = function () {
+					var countdown = 3;
+					setStatus("Align your face... " + countdown);
+					var interval = setInterval(function() {
+						countdown--;
+						if (countdown > 0) {
+							setStatus("Align your face... " + countdown);
+						} else {
+							clearInterval(interval);
+							takePicture();
+						}
+					}, 1000);
+				};
+			} else {
+				takePicture();
+			}
 		});
 	}
 
@@ -388,6 +417,10 @@
 	}
 
 	function killSwitch(reason) {
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
+		}
 		var redirected = false;
 		var goHome = function () {
 			if (redirected) {

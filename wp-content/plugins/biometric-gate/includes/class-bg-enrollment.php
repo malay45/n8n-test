@@ -45,9 +45,14 @@ class BG_Enrollment {
 		}
 
 		try {
-			$cropped = self::crop_portrait_via_pixlab( $tmp_path );
-			if ( is_wp_error( $cropped ) ) {
-				return $cropped;
+			// $cropped = self::crop_portrait_via_pixlab( $tmp_path );
+			// if ( is_wp_error( $cropped ) ) {
+			// 	return $cropped;
+			// }
+			// Bypassing PixLab API for now: upload photo directly without face-detection cropping.
+			$cropped = file_get_contents( $tmp_path );
+			if ( false === $cropped ) {
+				return new WP_Error( 'bg_read_failed', __( 'Could not read the uploaded image.', 'biometric-gate' ) );
 			}
 
 			$compressed = self::compress_to_small_jpeg( $cropped );
