@@ -38,7 +38,6 @@ require_once BG_PLUGIN_DIR . 'includes/class-bg-content-guard.php';
 require_once BG_PLUGIN_DIR . 'includes/class-bg-cache-compat.php';
 require_once BG_PLUGIN_DIR . 'includes/class-bg-frontend.php';
 require_once BG_PLUGIN_DIR . 'includes/class-bg-admin-page.php';
-require_once BG_PLUGIN_DIR . 'includes/class-bg-admin-test-enroll.php';
 
 register_activation_hook( BG_PLUGIN_FILE, array( 'BG_Activator', 'activate' ) );
 register_deactivation_hook( BG_PLUGIN_FILE, array( 'BG_Activator', 'deactivate' ) );
@@ -53,4 +52,3 @@ BG_Content_Guard::init();
 BG_Cache_Compat::init();
 BG_Frontend::init();
 BG_Admin_Page::init();
-BG_Admin_Test_Enroll::init();

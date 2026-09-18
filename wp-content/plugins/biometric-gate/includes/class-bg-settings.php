@@ -24,7 +24,6 @@ class BG_Settings {
 			'retention'           => '90',
 			'no_camera_message'   => self::default_no_camera_message(),
 			'pixlab_api_key'      => '',
-			'faceio_app_id'       => '',
 			'faceio_secret_key'   => '',
 		);
 	}
@@ -110,10 +109,6 @@ class BG_Settings {
 			? BG_Crypto::encrypt( sanitize_text_field( wp_unslash( $input['pixlab_api_key'] ) ) )
 			: '';
 
-		$clean['faceio_app_id'] = isset( $input['faceio_app_id'] ) && '' !== trim( $input['faceio_app_id'] )
-			? BG_Crypto::encrypt( sanitize_text_field( wp_unslash( $input['faceio_app_id'] ) ) )
-			: '';
-
 		$clean['faceio_secret_key'] = isset( $input['faceio_secret_key'] ) && '' !== trim( $input['faceio_secret_key'] )
 			? BG_Crypto::encrypt( sanitize_text_field( wp_unslash( $input['faceio_secret_key'] ) ) )
 			: '';
@@ -137,11 +132,6 @@ class BG_Settings {
 
 	public static function get_pixlab_api_key() {
 		$encrypted = self::get()['pixlab_api_key'];
-		return $encrypted ? BG_Crypto::decrypt( $encrypted ) : '';
-	}
-
-	public static function get_faceio_app_id() {
-		$encrypted = self::get()['faceio_app_id'];
 		return $encrypted ? BG_Crypto::decrypt( $encrypted ) : '';
 	}
 

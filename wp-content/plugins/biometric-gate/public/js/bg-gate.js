@@ -1,6 +1,14 @@
 /**
- * Biometric Gate — frontend lockout overlay, FaceIO widget integration, rolling
- * re-verification timer, and kill-switch. 
+ * Biometric Gate — frontend lockout overlay, gesture-anchored raw camera capture, rolling
+ * re-verification timer, and kill-switch.
+ *
+ * This does NOT use the FaceIO fio.js widget: enrollment is admin-driven (an ID photo
+ * uploaded in wp-admin), and FaceIO's client SDK has no way to accept a static reference
+ * image — its enroll()/authenticate() pair only ever compares against faces enrolled live,
+ * in-browser, on FaceIO's own facialId system. Verifying a live scan against an admin-
+ * uploaded photo instead requires a real image, so this captures a plain camera frame and
+ * hands it to our own backend, which calls FaceIO's stateless `faceverify` REST endpoint
+ * server-to-server (see class-bg-verification.php). The browser never decides "verified".
  */
 (function () {
 	'use strict';
@@ -17,7 +25,7 @@
 		return;
 	}
 
-	var overlayEl, statusEl, startBtn;
+	var overlayEl, videoEl, canvasEl, statusEl, startBtn;
 	var currentTicket = null;
 	var retryCount = 0;
 	var intentionalHide = false;
@@ -26,14 +34,13 @@
 	var pausedMedia = [];
 
 	var MAX_RETRIES = 3;
-
-	// Instantiate FaceIO
-	var faceio = null;
+	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
+	var CAPTURE_WIDTH = 320;
+	var CAPTURE_HEIGHT = 240;
 
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
-		// FaceIO will be instantiated right before the scan to prevent re-verify bugs.
 		buildOverlayScaffold();
 		observeTampering();
 		runScanCycle();
@@ -50,21 +57,24 @@
 		overlayEl.setAttribute('aria-modal', 'true');
 		overlayEl.hidden = true;
 
-		// The button text depends on if they have enrolled yet
-		var btnText = config.hasEnrollment ? config.i18n.startScan : "Enroll Face";
-
 		overlayEl.innerHTML =
 			'<div class="bg-gate-card">' +
-			'<h2>' + btnText + '</h2>' +
+			'<h2>' + config.i18n.startScan + '</h2>' +
 			'<p class="bg-gate-status" aria-live="polite"></p>' +
-			'<button type="button" class="bg-gate-start-btn">' + btnText + '</button>' +
+			'<div class="bg-gate-video-frame"><video playsinline autoplay muted></video></div>' +
+			'<button type="button" class="bg-gate-start-btn">' + config.i18n.startScan + '</button>' +
 			(config.isAdmin ? '<button type="button" class="bg-gate-dev-bypass-btn" style="margin-top:10px; background:#d63638;">Admin Dev Bypass</button>' : '') +
 			'</div>';
 
 		document.body.appendChild(overlayEl);
 
+		videoEl = overlayEl.querySelector('video');
 		statusEl = overlayEl.querySelector('.bg-gate-status');
 		startBtn = overlayEl.querySelector('.bg-gate-start-btn');
+
+		canvasEl = document.createElement('canvas');
+		canvasEl.width = CAPTURE_WIDTH;
+		canvasEl.height = CAPTURE_HEIGHT;
 
 		startBtn.addEventListener('click', onStartActionClick);
 
@@ -199,130 +209,96 @@
 	}
 
 	function onStartActionClick() {
-		if (typeof faceIO === 'undefined') {
-			setStatus("FACEIO library failed to load.");
+		if (!config.hasEnrollment) {
+			// Content-guard normally intercepts this case with a static "not-enrolled" shell
+			// before this script ever runs; this is just a defensive fallback.
+			setStatus(config.i18n.noEnrollment || 'No biometric profile is on file. Contact your administrator.');
 			return;
 		}
-
-		// Fresh instance every time fixes the bug where the widget doesn't show on re-verification
-		faceio = new faceIO(config.faceioAppId);
 
 		startBtn.disabled = true;
 		setStatus(config.i18n.verifying);
 
-		checkVirtualCamera().then(function () {
-			if (config.hasEnrollment) {
-				doAuthenticate();
-			} else {
-				setStatus("Registering your face...");
-				doEnroll();
+		navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
+			.then(auditDevicesThenCapture)
+			.catch(handleCameraError);
+	}
+
+	function buildVideoConstraints() {
+		var preferred = null;
+		try {
+			preferred = window.localStorage.getItem('bg_preferred_camera_id');
+		} catch (e) { /* localStorage unavailable — fall back to default camera. */ }
+
+		return preferred ? { deviceId: { exact: preferred } } : true;
+	}
+
+	/**
+	 * Device-label auditing runs *after* getUserMedia grants permission, not before: browsers
+	 * withhold device labels entirely pre-permission, so every legitimate first-time visitor
+	 * would show empty labels and false-positive a kill-switch if audited first.
+	 */
+	function auditDevicesThenCapture(stream) {
+		return navigator.mediaDevices.enumerateDevices().then(function (devices) {
+			var videoInputs = devices.filter(function (d) { return 'videoinput' === d.kind; });
+
+			var suspicious = videoInputs.some(function (d) {
+				var label = (d.label || '').trim().toLowerCase();
+				return '' === label || VIRTUAL_CAMERA_PATTERN.test(label);
+			});
+
+			if (suspicious) {
+				stopStream(stream);
+				killSwitch('virtual_camera_detected');
+				return;
 			}
-		}).catch(function (reason) {
-			killSwitch(reason);
+
+			return captureAndSubmit(stream);
 		});
 	}
 
-	function checkVirtualCamera() {
-		return new Promise(function (resolve, reject) {
-			if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices || !navigator.mediaDevices.getUserMedia) {
-				return resolve();
-			}
+	function captureAndSubmit(stream) {
+		videoEl.srcObject = stream;
 
-			// We must request permission first; otherwise modern browsers return empty labels
-			navigator.mediaDevices.getUserMedia({ video: true })
-				.then(function (stream) {
-					navigator.mediaDevices.enumerateDevices().then(function (devices) {
-						// Immediately release the camera so FaceIO can use it
-						stream.getTracks().forEach(function (track) { track.stop(); });
+		return new Promise(function (resolve) {
+			videoEl.onloadeddata = function () {
+				var ctx = canvasEl.getContext('2d');
+				ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
+				var base64 = dataUrl.split(',')[1] || '';
 
-						var videoDevices = devices.filter(function (d) { return d.kind === 'videoinput'; });
-						var suspicious = ['virtual', 'obs', 'software engine', 'splitcam', 'manycam', 'vcam', 'xsplit', 'epoccam', 'iripe'];
+				stopStream(stream);
 
-						for (var i = 0; i < videoDevices.length; i++) {
-							var label = videoDevices[i].label.toLowerCase();
-
-							if (label.trim() === '') {
-								// An empty label after permission is granted is heavily indicative of a forged/simulated device in many browsers
-								return reject('virtual_camera_empty_signature');
-							}
-
-							for (var j = 0; j < suspicious.length; j++) {
-								if (label.indexOf(suspicious[j]) !== -1) {
-									return reject('virtual_camera_detected');
-								}
-							}
-						}
-
-						resolve();
-					}).catch(function () { resolve(); });
-				})
-				.catch(function () {
-					// Camera denied or unavailable. Let FaceIO handle it normally so the user sees the proper error message.
-					resolve();
-				});
+				resolve(
+					apiPost('/scan/result', {
+						ticket: currentTicket,
+						frame: base64,
+						page_title: config.pageTitle,
+						page_url: config.pageUrl,
+					}).then(handleScanSuccess).catch(handleScanError)
+				);
+			};
 		});
 	}
 
-	function doAuthenticate() {
-		faceio.authenticate({
-			"payload": { "user_id": config.userId }
-		}).then(function (userData) {
-			// Success! Send facialId to backend.
-			apiPost('/scan/result', {
-				ticket: currentTicket,
-				facialId: userData.facialId,
-				page_title: config.pageTitle,
-				page_url: config.pageUrl,
-			}).then(handleScanSuccess).catch(handleScanError);
-		}).catch(function (errCode) {
-			handleScanError({
-				code: 'faceio_error',
-				error: errCode,
-				message: getFaceioErrorMessage(errCode),
-				isCameraError: (errCode === 1 || errCode === 20)
-			});
-		});
+	function handleCameraError(err) {
+		var name = err && err.name ? err.name : '';
+
+		if ('NotFoundError' === name || 'OverconstrainedError' === name) {
+			setStatus(config.noCameraMessage || config.i18n.noCamera, true);
+			startBtn.disabled = false;
+			return;
+		}
+
+		// Permission denied, or any other getUserMedia failure — counts as a failed attempt,
+		// same as a failed face match, so a student can't dodge verification by repeatedly
+		// declining the camera prompt.
+		handleScanError({ code: 'bg_camera_denied', message: config.i18n.scanFailed });
 	}
 
-	function doEnroll() {
-		faceio.enroll({
-			"payload": { "user_id": config.userId }
-		}).then(function (userData) {
-			// Success! User is enrolled. Send facialId to backend to save it.
-			apiPost('/scan/enroll-front', {
-				facialId: userData.facialId
-			}).then(function () {
-				// Enrollment saved. Now they are verified and enrolled.
-				config.hasEnrollment = true;
-				handleScanSuccess({ seconds_until_rescan: config.scanThresholdSec });
-			}).catch(function (err) {
-				handleScanError(err);
-			});
-		}).catch(function (errCode) {
-			handleScanError({
-				code: 'faceio_error',
-				error: errCode,
-				message: getFaceioErrorMessage(errCode),
-				isCameraError: (errCode === 1 || errCode === 20)
-			});
-		});
-	}
-
-	function getFaceioErrorMessage(errCode) {
-		switch (errCode) {
-			case 1:
-			case 20:
-				return config.noCameraMessage || config.i18n.noCamera;
-			case 2: return "No face detected. Please ensure your face is visible.";
-			case 3: return "Face data not available / Unrecognized face.";
-			case 4: return "Multiple faces detected. Please ensure only one face is in the frame.";
-			case 5: return "Face already enrolled.";
-			case 6: return "Spoofing attempt detected.";
-			case 7: return "Face mismatch.";
-			case 10: return "Application unauthorized (Check Domain Whitelisting in FACEIO Console).";
-			case 13: return "Session expired. Please try again.";
-			case 14: return "Network timeout. Please check your connection.";
-			default: return "Face scan failed (Error Code: " + errCode + ").";
+	function stopStream(stream) {
+		if (stream && stream.getTracks) {
+			stream.getTracks().forEach(function (track) { track.stop(); });
 		}
 	}
 

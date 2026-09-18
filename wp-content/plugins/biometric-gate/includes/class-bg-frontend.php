@@ -38,17 +38,9 @@ class BG_Frontend {
 		);
 
 		wp_enqueue_script(
-			'fio-js',
-			'https://cdn.faceio.net/fio.js',
-			array(),
-			null,
-			true
-		);
-
-		wp_enqueue_script(
 			'bg-gate',
 			BG_PLUGIN_URL . 'public/js/bg-gate.js',
-			array('fio-js'),
+			array(),
 			file_exists( $js_path ) ? filemtime( $js_path ) : BG_PLUGIN_VERSION,
 			true
 		);
@@ -63,19 +55,18 @@ class BG_Frontend {
 				'nonce'            => wp_create_nonce( 'wp_rest' ),
 				'hasValidSession'  => BG_Session::is_within_guard_window( $user_id ),
 				'hasEnrollment'    => BG_Enrollment::has_enrollment( $user_id ),
-				'userId'           => $user_id,
 				'pageTitle'        => wp_strip_all_tags( get_the_title() ? get_the_title() : wp_get_document_title() ),
 				'pageUrl'          => home_url( BG_Route_Matcher::current_path() ),
 				'scanThresholdSec' => (int) $settings['scan_threshold_secs'],
 				'guardWindowSec'   => (int) $settings['guard_window_secs'],
 				'noCameraMessage'  => wp_kses_post( $settings['no_camera_message'] ),
 				'isAdmin'          => current_user_can( 'manage_options' ),
-				'faceioAppId'      => BG_Settings::get_faceio_app_id(),
 				'i18n'             => array(
 					'startScan'      => __( 'Start Face Scan', 'biometric-gate' ),
 					'verifying'      => __( 'Verifying your identity…', 'biometric-gate' ),
 					'scanFailed'     => __( 'We could not verify your identity. Please try again.', 'biometric-gate' ),
 					'noCamera'       => __( 'No webcam was detected on this device.', 'biometric-gate' ),
+					'noEnrollment'   => __( 'No biometric profile is on file. Contact your administrator.', 'biometric-gate' ),
 					'connectionLost' => __( 'Your internet connection appears to be offline. Please reconnect to continue.', 'biometric-gate' ),
 				),
 			)
