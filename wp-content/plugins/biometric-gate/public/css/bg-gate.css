@@ -2,7 +2,7 @@
    Deliberately framework-agnostic: no theme-specific selectors, generic <video>/<iframe>
    targeting only, so this ships identically on any WordPress site (spec #11). */
 
-html.bg-gate-blur-active body > *:not(#bg-gate-overlay) {
+html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 	filter: blur(18px);
 	pointer-events: none;
 	user-select: none;
@@ -29,6 +29,11 @@ html.bg-gate-blur-active body > *:not(#bg-gate-overlay) {
 	text-align: center;
 	padding: 24px;
 	box-sizing: border-box;
+}
+
+#faceio-modal {
+	position: relative;
+	z-index: 99999999;
 }
 
 #bg-gate-overlay[hidden] {
@@ -68,7 +73,8 @@ html.bg-gate-blur-active body > *:not(#bg-gate-overlay) {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	transform: scaleX(-1); /* Mirror, matching how users expect to see themselves. */
+	transform: scaleX(-1);
+	/* Mirror, matching how users expect to see themselves. */
 }
 
 .bg-gate-start-btn {
@@ -81,7 +87,8 @@ html.bg-gate-blur-active body > *:not(#bg-gate-overlay) {
 	font-weight: 600;
 	padding: 14px 32px;
 	cursor: pointer;
-	min-height: 48px; /* Comfortable mobile tap target. */
+	min-height: 48px;
+	/* Comfortable mobile tap target. */
 }
 
 .bg-gate-start-btn:active {
