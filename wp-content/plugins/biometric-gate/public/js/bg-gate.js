@@ -33,11 +33,7 @@
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
-		// Initialize FaceIO
-		if (typeof faceIO !== 'undefined') {
-			faceio = new faceIO(config.faceioAppId);
-		}
-
+		// FaceIO will be instantiated right before the scan to prevent re-verify bugs.
 		buildOverlayScaffold();
 		observeTampering();
 		runScanCycle();
@@ -203,10 +199,13 @@
 	}
 
 	function onStartActionClick() {
-		if (!faceio) {
+		if (typeof faceIO === 'undefined') {
 			setStatus("FACEIO library failed to load.");
 			return;
 		}
+
+		// Fresh instance every time fixes the bug where the widget doesn't show on re-verification
+		faceio = new faceIO(config.faceioAppId);
 
 		startBtn.disabled = true;
 		setStatus(config.i18n.verifying);
