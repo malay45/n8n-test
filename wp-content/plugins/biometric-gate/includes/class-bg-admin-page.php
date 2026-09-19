@@ -99,10 +99,28 @@ class BG_Admin_Page {
 
 		$tab = self::current_tab();
 
-		wp_enqueue_style( 'bg-admin', BG_PLUGIN_URL . 'admin/css/admin-dashboard.css', array(), BG_PLUGIN_VERSION );
+		// filemtime()-based versioning (matching BG_Frontend's pattern) so every deploy gets a
+		// new query string and browsers/caches never keep serving a stale copy of these assets
+		// after an update — a static BG_PLUGIN_VERSION here previously meant the admin JS could
+		// silently stay cached indefinitely across releases.
+		$admin_css_path = BG_PLUGIN_DIR . 'admin/css/admin-dashboard.css';
+		$admin_js_path  = BG_PLUGIN_DIR . 'admin/js/admin-dashboard.js';
+
+		wp_enqueue_style(
+			'bg-admin',
+			BG_PLUGIN_URL . 'admin/css/admin-dashboard.css',
+			array(),
+			file_exists( $admin_css_path ) ? filemtime( $admin_css_path ) : BG_PLUGIN_VERSION
+		);
 
 		if ( in_array( $tab, array( 'a', 'c' ), true ) ) {
-			wp_enqueue_script( 'bg-admin', BG_PLUGIN_URL . 'admin/js/admin-dashboard.js', array(), BG_PLUGIN_VERSION, true );
+			wp_enqueue_script(
+				'bg-admin',
+				BG_PLUGIN_URL . 'admin/js/admin-dashboard.js',
+				array(),
+				file_exists( $admin_js_path ) ? filemtime( $admin_js_path ) : BG_PLUGIN_VERSION,
+				true
+			);
 
 			wp_localize_script(
 				'bg-admin',
