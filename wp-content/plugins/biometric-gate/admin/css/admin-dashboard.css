@@ -22,3 +22,19 @@
 	font-style: italic;
 	opacity: 0.8;
 }
+
+.bg-status-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	color: #fff;
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.bg-upload-type-select {
+	display: block;
+	margin-bottom: 4px;
+	max-width: 100%;
+}

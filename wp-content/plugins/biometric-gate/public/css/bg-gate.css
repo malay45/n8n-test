@@ -58,15 +58,19 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 }
 
 .bg-gate-video-frame {
-	width: 240px;
-	height: 240px;
-	max-width: 60vw;
-	max-height: 60vw;
+	/* Oval (not circular) guide mask — an unequal width/height box with border-radius: 50%
+	   renders as an ellipse, giving a more face-shaped framing cue than a plain circle. */
+	position: relative;
+	width: 220px;
+	height: 280px;
+	max-width: 56vw;
+	max-height: 70vw;
 	margin: 0 auto 20px;
 	border-radius: 50%;
 	overflow: hidden;
 	background: #1a1c22;
 	border: 3px solid #3a8dff;
+	box-shadow: 0 0 0 4px rgba(58, 141, 255, 0.25);
 }
 
 .bg-gate-video-frame video {

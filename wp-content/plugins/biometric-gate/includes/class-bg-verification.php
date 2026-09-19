@@ -18,6 +18,11 @@
  *            string or a public URL, but a data URI is the most unambiguous of the three).
  *   target - the comparison image, same format.
  * Response: { status, same_person: bool, dist: float, sim: float } on success.
+ *
+ * `sim` is FaceIO's similarity score. Its exact scale (0-1 fraction vs. 0-100 percentage)
+ * isn't unambiguous from the docs alone — normalize_score() below treats anything <= 1 as a
+ * fraction and multiplies by 100. This should be confirmed against one real API response
+ * (logged raw) before trusting the confidence-threshold math in production.
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -31,9 +36,20 @@ class BG_Verification {
 	/**
 	 * @param int    $user_id
 	 * @param string $live_frame_binary Raw JPEG/PNG bytes captured from the user's camera just now.
-	 * @return true|WP_Error True on a confirmed match. WP_Error with code 'bg_cloud_timeout' on a
-	 *                        FaceIO-side timeout/5xx (spec #5's one-loop grace bypass applies to
-	 *                        that case only); any other WP_Error means a genuine non-match/failure.
+	 * @return array|WP_Error {
+	 *     A completed comparison, regardless of pass/fail, as an array so both branches carry
+	 *     a score to log:
+	 *
+	 *     @type bool       $pass  True only when FaceIO both reports same_person=true AND the
+	 *                             normalized score clears the admin's configured threshold.
+	 *     @type float|null $score Normalized 0-100 similarity score, or null if FaceIO's
+	 *                             response didn't include one.
+	 * }
+	 *                        A WP_Error means the comparison could not be completed at all —
+	 *                        'bg_cloud_timeout' specifically for a FaceIO-side timeout/5xx
+	 *                        (spec #5's one-loop grace bypass applies to that case only); any
+	 *                        other code means a hard failure to even reach a verdict (no
+	 *                        reference on file, missing config, unusable frame, etc.).
 	 */
 	public static function verify_against_reference( $user_id, $live_frame_binary ) {
 		$reference_b64 = BG_Enrollment::get_reference_portrait( $user_id );
@@ -86,10 +102,30 @@ class BG_Verification {
 			return new WP_Error( 'bg_unexpected_response', $message );
 		}
 
-		if ( true !== $body['same_person'] ) {
-			return new WP_Error( 'bg_no_match', __( 'The live scan did not match the enrolled identity.', 'biometric-gate' ) );
+		$score     = isset( $body['sim'] ) ? self::normalize_score( $body['sim'] ) : null;
+		$threshold = BG_Settings::get_min_confidence_percent();
+
+		$pass = ( true === $body['same_person'] ) && ( null === $score || $score >= $threshold );
+
+		return array(
+			'pass'  => $pass,
+			'score' => $score,
+		);
+	}
+
+	/**
+	 * FaceIO's `sim` field scale isn't unambiguous from the docs alone. Treat anything <= 1 as
+	 * a 0-1 fraction and scale to a percentage; anything above is assumed already a percentage.
+	 *
+	 * @param mixed $raw
+	 * @return float|null
+	 */
+	private static function normalize_score( $raw ) {
+		if ( ! is_numeric( $raw ) ) {
+			return null;
 		}
 
-		return true;
+		$value = (float) $raw;
+		return ( $value <= 1 ) ? round( $value * 100, 2 ) : round( $value, 2 );
 	}
 }

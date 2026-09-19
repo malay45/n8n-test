@@ -48,14 +48,21 @@ class BG_Admin_Page {
 		$missing = array();
 
 		if ( ! defined( 'BIOMETRIC_GATE_ENCRYPTION_KEY' ) || '' === constant( 'BIOMETRIC_GATE_ENCRYPTION_KEY' ) ) {
-			$missing[] = "<code>BIOMETRIC_GATE_ENCRYPTION_KEY</code> (" . __( 'used to encrypt stored reference portraits, must be in wp-config.php', 'biometric-gate' ) . ")";
-		}
-		if ( '' === BG_Settings::get_pixlab_api_key() ) {
-			$missing[] = "<code>PixLab API Key</code> (" . __( 'used for ID-photo face cropping, must be set in Global Settings', 'biometric-gate' ) . ")";
+			$missing[] = "<code>BIOMETRIC_GATE_ENCRYPTION_KEY</code> (" . __( 'used to encrypt stored reference portraits and vault paths, must be in wp-config.php', 'biometric-gate' ) . ")";
 		}
 		if ( '' === BG_Settings::get_faceio_secret_key() ) {
 			$missing[] = "<code>FACEIO REST API Key</code> (" . __( 'used to call FACEIO\'s faceverify REST API — find it in the FACEIO Console under Application Manager → API key tab, NOT the client-side Application/Public ID; must be set in Global Settings', 'biometric-gate' ) . ")";
 		}
+		if ( ! wp_is_writable( BG_Settings::get_vault_dir() ) && ! wp_mkdir_p( BG_Settings::get_vault_dir() ) ) {
+			$missing[] = sprintf(
+				/* translators: %s: absolute directory path */
+				__( 'Secure Server Storage Directory Path (%s) does not exist and could not be created — check its parent directory\'s permissions', 'biometric-gate' ),
+				'<code>' . esc_html( BG_Settings::get_vault_dir() ) . '</code>'
+			);
+		}
+
+		// PixLab is intentionally optional/budget-gated (client's "Official ID" upload route
+		// only) — it is NOT listed here as a hard requirement, unlike the two keys above.
 
 		if ( empty( $missing ) ) {
 			return;
@@ -170,6 +177,9 @@ class BG_Admin_Page {
 				'no_camera_message'   => isset( $_POST['no_camera_message'] ) ? wp_unslash( $_POST['no_camera_message'] ) : '',
 				'pixlab_api_key'      => isset( $_POST['pixlab_api_key'] ) ? wp_unslash( $_POST['pixlab_api_key'] ) : '',
 				'faceio_secret_key'   => isset( $_POST['faceio_secret_key'] ) ? wp_unslash( $_POST['faceio_secret_key'] ) : '',
+				'faceio_app_id'       => isset( $_POST['faceio_app_id'] ) ? wp_unslash( $_POST['faceio_app_id'] ) : '',
+				'vault_dir_path'      => isset( $_POST['vault_dir_path'] ) ? wp_unslash( $_POST['vault_dir_path'] ) : '',
+				'min_confidence_percent' => isset( $_POST['min_confidence_percent'] ) ? wp_unslash( $_POST['min_confidence_percent'] ) : '',
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -252,6 +262,27 @@ class BG_Admin_Page {
 					<td>
 						<input type="password" name="faceio_secret_key" id="faceio_secret_key" value="<?php echo esc_attr( BG_Settings::get_faceio_secret_key() ); ?>" class="regular-text" />
 						<p class="description"><?php esc_html_e( 'FACEIO Console → Application Manager → API key tab. This is NOT the client-side Application/Public ID — it is a separate REST API credential used only server-side.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="faceio_app_id"><?php esc_html_e( 'FACEIO Public Application ID', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="text" name="faceio_app_id" id="faceio_app_id" value="<?php echo esc_attr( BG_Settings::get_faceio_app_id() ); ?>" class="regular-text" />
+						<p class="description"><?php esc_html_e( 'Stored for record-keeping only — the current server-to-server faceverify call does not send this value anywhere. Not a secret.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="vault_dir_path"><?php esc_html_e( 'Secure Server Storage Directory Path', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="text" name="vault_dir_path" id="vault_dir_path" value="<?php echo esc_attr( BG_Settings::get_vault_dir() ); ?>" class="regular-text" />
+						<p class="description"><?php esc_html_e( 'Absolute server path where encrypted reference portraits are stored as flat files. Defaults to wp-content/secure-student-vault/.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="min_confidence_percent"><?php esc_html_e( 'Minimum Match Confidence Cutoff (%)', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="number" min="1" max="100" step="1" name="min_confidence_percent" id="min_confidence_percent" value="<?php echo esc_attr( BG_Settings::get_min_confidence_percent() ); ?>" class="small-text" />
+						<p class="description"><?php esc_html_e( 'A live scan must clear both FACEIO\'s same_person match AND this similarity score to pass.', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
 			</table>

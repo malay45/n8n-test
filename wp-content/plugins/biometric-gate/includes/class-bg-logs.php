@@ -33,7 +33,7 @@ class BG_Logs
 	 *
 	 * @return int|false Inserted row ID, or false on invalid input.
 	 */
-	public static function insert($user_id, $status, $page_title, $page_url)
+	public static function insert($user_id, $status, $page_title, $page_url, $confidence_score = null)
 	{
 		if (! in_array($status, self::VALID_STATUSES, true)) {
 			return false;
@@ -44,13 +44,14 @@ class BG_Logs
 		return $wpdb->insert(
 			BG_Activator::table_name(),
 			array(
-				'user_id'     => absint($user_id),
-				'scan_status' => $status,
-				'page_title'  => mb_substr(wp_strip_all_tags((string) $page_title), 0, 255),
-				'page_url'    => mb_substr(esc_url_raw((string) $page_url), 0, 500),
-				'created_at'  => current_time('mysql', true),
+				'user_id'          => absint($user_id),
+				'scan_status'      => $status,
+				'page_title'       => mb_substr(wp_strip_all_tags((string) $page_title), 0, 255),
+				'page_url'         => mb_substr(esc_url_raw((string) $page_url), 0, 500),
+				'confidence_score' => null === $confidence_score ? null : round((float) $confidence_score, 2),
+				'created_at'       => current_time('mysql', true),
 			),
-			array('%d', '%s', '%s', '%s', '%s')
+			array('%d', '%s', '%s', '%s', '%f', '%s')
 		) ? $wpdb->insert_id : false;
 	}
 
@@ -112,7 +113,7 @@ class BG_Logs
 		$count_sql = "SELECT COUNT(*) FROM {$logs_table} l LEFT JOIN {$users_table} u ON u.ID = l.user_id WHERE {$where_sql}";
 		$total     = (int) $wpdb->get_var($wpdb->prepare($count_sql, $params));
 
-		$rows_sql = "SELECT l.id, l.user_id, l.scan_status, l.page_title, l.page_url, l.created_at, u.display_name
+		$rows_sql = "SELECT l.id, l.user_id, l.scan_status, l.page_title, l.page_url, l.confidence_score, l.created_at, u.display_name
 			FROM {$logs_table} l LEFT JOIN {$users_table} u ON u.ID = l.user_id
 			WHERE {$where_sql}
 			ORDER BY {$orderby} {$order}
@@ -161,7 +162,7 @@ class BG_Logs
 			return 0;
 		}
 
-		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Page Title', 'Page URL'));
+		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
 
 		$last_id  = 0;
 		$written  = 0;
@@ -182,7 +183,7 @@ class BG_Logs
 			$where_sql = implode(' AND ', $where);
 
 			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- table name hardcoded, $where_sql built only from placeholders above.
-			$sql  = "SELECT id, user_id, scan_status, page_title, page_url, created_at FROM {$logs_table} WHERE {$where_sql} ORDER BY id ASC LIMIT %d";
+			$sql  = "SELECT id, user_id, scan_status, page_title, page_url, confidence_score, created_at FROM {$logs_table} WHERE {$where_sql} ORDER BY id ASC LIMIT %d";
 			$rows = $wpdb->get_results($wpdb->prepare($sql, array_merge($params, array(self::BATCH_SIZE))), ARRAY_A);
 			// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
 
@@ -207,6 +208,7 @@ class BG_Logs
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						$row['scan_status'],
+						null === $row['confidence_score'] ? '' : $row['confidence_score'],
 						$row['page_title'],
 						$row['page_url'],
 					)
@@ -340,11 +342,11 @@ class BG_Logs
 			return;
 		}
 
-		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Page Title', 'Page URL'));
+		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
 
 		$last_id = 0;
 		do {
-			$sql  = "SELECT id, user_id, scan_status, page_title, page_url, created_at FROM {$logs_table} WHERE id > %d AND created_at < %s ORDER BY id ASC LIMIT %d";
+			$sql  = "SELECT id, user_id, scan_status, page_title, page_url, confidence_score, created_at FROM {$logs_table} WHERE id > %d AND created_at < %s ORDER BY id ASC LIMIT %d";
 			$rows = $wpdb->get_results($wpdb->prepare($sql, $last_id, $cutoff, self::BATCH_SIZE), ARRAY_A); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 
 			if (empty($rows)) {
@@ -365,6 +367,7 @@ class BG_Logs
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						$row['scan_status'],
+						null === $row['confidence_score'] ? '' : $row['confidence_score'],
 						$row['page_title'],
 						$row['page_url'],
 					)

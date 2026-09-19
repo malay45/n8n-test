@@ -67,7 +67,12 @@ class BG_Admin_Rest_Controller {
 			return new WP_Error( 'bg_no_file', __( 'No ID photo was uploaded.', 'biometric-gate' ), array( 'status' => 400 ) );
 		}
 
-		$result = BG_Enrollment::enroll_from_upload( $user_id, $files['id_photo'] );
+		$upload_type = (string) $request->get_param( 'upload_type' );
+		if ( BG_Enrollment::UPLOAD_TYPE_OFFICIAL_ID !== $upload_type ) {
+			$upload_type = BG_Enrollment::UPLOAD_TYPE_STANDARD_IMAGE;
+		}
+
+		$result = BG_Enrollment::enroll_from_upload( $user_id, $files['id_photo'], $upload_type );
 
 		if ( is_wp_error( $result ) ) {
 			return new WP_Error( $result->get_error_code(), $result->get_error_message(), array( 'status' => 422 ) );

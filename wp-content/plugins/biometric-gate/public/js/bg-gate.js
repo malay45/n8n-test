@@ -32,11 +32,13 @@
 	var rescheduleTimer = null;
 	var reconnectPollTimer = null;
 	var pausedMedia = [];
+	var activeStream = null;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
 	var CAPTURE_WIDTH = 320;
 	var CAPTURE_HEIGHT = 240;
+	var DARKNESS_THRESHOLD = 40; // 0-255 average perceptual luminance; heuristic, tune after real-world testing.
 
 	document.addEventListener('DOMContentLoaded', init);
 
@@ -119,6 +121,10 @@
 		overlayEl.hidden = true;
 		document.documentElement.classList.remove('bg-gate-blur-active');
 		resumeAllMedia(); // Restore media state
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
+		}
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
@@ -148,14 +154,21 @@
 		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
 	}
 
+	/**
+	 * Deliberately targets only the generic <video>/<audio>/<iframe> web standards — no
+	 * PrestoPlayer-, YouTube-, or Vimeo-specific selectors or classes, per the spec's explicit
+	 * "no LearnDash/PrestoPlayer-specific code" portability rule (spec #1, #11). This keeps the
+	 * plugin a true drop-in on any WordPress site, though it means a media player whose actual
+	 * playback element isn't a plain <video>/<audio> tag may not always pause reliably — worth
+	 * a manual check on the real course pages this ships to.
+	 */
 	function pauseAllMedia() {
 		pausedMedia = [];
-		var mediaElements = document.querySelectorAll('video, audio, presto-player, presto-youtube, presto-vimeo, presto-video, presto-audio, presto-bunny');
+		var mediaElements = document.querySelectorAll('video, audio');
 		mediaElements.forEach(function (el) {
 			try {
 				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
-				var isPrestoPlaying = el.classList && (el.classList.contains('plyr--playing') || el.querySelector('.plyr--playing'));
-				if (isPlaying || isPrestoPlaying) {
+				if (isPlaying) {
 					pausedMedia.push(el);
 				}
 				if (typeof el.pause === 'function') {
@@ -217,11 +230,15 @@
 		}
 
 		startBtn.disabled = true;
-		setStatus(config.i18n.verifying);
 
-		navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
-			.then(auditDevicesThenCapture)
-			.catch(handleCameraError);
+		if (activeStream) {
+			captureAndSubmit(activeStream, false);
+		} else {
+			setStatus(config.i18n.verifying || "Starting camera...");
+			navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
+				.then(auditDevicesThenCapture)
+				.catch(handleCameraError);
+		}
 	}
 
 	function buildVideoConstraints() {
@@ -253,21 +270,51 @@
 				return;
 			}
 
-			return captureAndSubmit(stream);
+			activeStream = stream;
+			return captureAndSubmit(stream, true);
 		});
 	}
 
-	function captureAndSubmit(stream) {
-		videoEl.srcObject = stream;
+	/**
+	 * Grid-sampled (every 10th pixel, not every pixel) average perceptual luminance of the
+	 * already-drawn canvas frame — cheap enough to run on every capture attempt.
+	 */
+	function isFrameTooDark(ctx) {
+		var data = ctx.getImageData(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT).data;
+		var total = 0;
+		var count = 0;
+
+		for (var i = 0; i < data.length; i += 40) { // 4 bytes/pixel * 10 pixels.
+			total += (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+			count++;
+		}
+
+		var average = count > 0 ? (total / count) : 255;
+		return average < DARKNESS_THRESHOLD;
+	}
+
+	function captureAndSubmit(stream, isFirstTime) {
+		if (isFirstTime) {
+			videoEl.srcObject = stream;
+		}
 
 		return new Promise(function (resolve) {
-			videoEl.onloadeddata = function () {
+			var takePicture = function() {
+				setStatus(config.i18n.verifying || "Verifying...");
 				var ctx = canvasEl.getContext('2d');
 				ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+
+				if (isFrameTooDark(ctx)) {
+					// Never reaches FACEIO, so this doesn't count as one of the 3 strikes —
+					// the user just needs better lighting and can hit Start Face Scan again.
+					setStatus(config.i18n.tooDark || 'Environment Too Dark. Please turn on a light to continue.');
+					startBtn.disabled = false;
+					startBtn.hidden = false;
+					return;
+				}
+
 				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
 				var base64 = dataUrl.split(',')[1] || '';
-
-				stopStream(stream);
 
 				resolve(
 					apiPost('/scan/result', {
@@ -278,6 +325,24 @@
 					}).then(handleScanSuccess).catch(handleScanError)
 				);
 			};
+
+			if (isFirstTime) {
+				videoEl.onloadeddata = function () {
+					var countdown = 3;
+					setStatus("Align your face... " + countdown);
+					var interval = setInterval(function() {
+						countdown--;
+						if (countdown > 0) {
+							setStatus("Align your face... " + countdown);
+						} else {
+							clearInterval(interval);
+							takePicture();
+						}
+					}, 1000);
+				};
+			} else {
+				takePicture();
+			}
 		});
 	}
 
@@ -388,6 +453,10 @@
 	}
 
 	function killSwitch(reason) {
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
+		}
 		var redirected = false;
 		var goHome = function () {
 			if (redirected) {

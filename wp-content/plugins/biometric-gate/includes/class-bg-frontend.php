@@ -68,6 +68,7 @@ class BG_Frontend {
 					'noCamera'       => __( 'No webcam was detected on this device.', 'biometric-gate' ),
 					'noEnrollment'   => __( 'No biometric profile is on file. Contact your administrator.', 'biometric-gate' ),
 					'connectionLost' => __( 'Your internet connection appears to be offline. Please reconnect to continue.', 'biometric-gate' ),
+					'tooDark'        => __( 'Environment Too Dark. Please turn on a light to continue.', 'biometric-gate' ),
 				),
 			)
 		);
