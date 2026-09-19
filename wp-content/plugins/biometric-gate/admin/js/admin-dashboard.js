@@ -70,6 +70,37 @@
 		window.alert((err && err.message) || "Something went wrong.");
 	}
 
+	/**
+	 * PHP already applies the confidence threshold before ever writing 'success' vs 'failure'
+	 * (see BG_Verification::verify_against_reference()), so this only needs to color by the
+	 * status that's already been decided server-side — never re-derive pass/fail here.
+	 */
+	function buildStatusBadge(status, confidenceScore) {
+		var labels = {
+			success: "Success",
+			failure: "Failure",
+			cloud_bypass: "Cloud Bypass",
+			timeout: "Timeout",
+		};
+		var colors = {
+			success: "#00a32a",
+			failure: "#d63638",
+			cloud_bypass: "#dba617",
+			timeout: "#787c82",
+		};
+
+		var label = labels[status] || status;
+		if (confidenceScore !== null && confidenceScore !== undefined && confidenceScore !== "") {
+			label += " (" + parseFloat(confidenceScore).toFixed(1) + "% Match)";
+		}
+
+		var badge = document.createElement("span");
+		badge.className = "bg-status-badge";
+		badge.textContent = label;
+		badge.style.backgroundColor = colors[status] || "#787c82";
+		return badge;
+	}
+
 	function humanSize(bytes) {
 		if (bytes < 1024) {
 			return bytes + " B";
@@ -133,6 +164,17 @@
 			tr.appendChild(statusTd);
 
 			var uploadTd = document.createElement("td");
+			var typeSelect = document.createElement("select");
+			typeSelect.className = "bg-upload-type-select";
+			var optStandard = document.createElement("option");
+			optStandard.value = "standard_image";
+			optStandard.textContent = "Standard Student Image";
+			var optOfficial = document.createElement("option");
+			optOfficial.value = "official_id";
+			optOfficial.textContent = "Official ID (Passport/License)";
+			typeSelect.appendChild(optStandard);
+			typeSelect.appendChild(optOfficial);
+
 			var fileInput = document.createElement("input");
 			fileInput.type = "file";
 			fileInput.accept = "image/jpeg,image/png";
@@ -141,8 +183,10 @@
 			uploadBtn.className = "button";
 			uploadBtn.textContent = "Upload";
 			uploadBtn.addEventListener("click", function () {
-				uploadIdPhoto(u.id, fileInput, statusTd);
+				uploadIdPhoto(u.id, fileInput, typeSelect.value, statusTd);
 			});
+			uploadTd.appendChild(typeSelect);
+			uploadTd.appendChild(document.createElement("br"));
 			uploadTd.appendChild(fileInput);
 			uploadTd.appendChild(uploadBtn);
 			tr.appendChild(uploadTd);
@@ -196,7 +240,7 @@
 		});
 	}
 
-	function uploadIdPhoto(userId, fileInput, statusCell) {
+	function uploadIdPhoto(userId, fileInput, uploadType, statusCell) {
 		if (!fileInput.files || !fileInput.files[0]) {
 			window.alert("Choose a file first.");
 			return;
@@ -205,6 +249,7 @@
 		var formData = new FormData();
 		formData.append("user_id", userId);
 		formData.append("id_photo", fileInput.files[0]);
+		formData.append("upload_type", uploadType || "standard_image");
 
 		apiFetch("/admin/enroll", { method: "POST", body: formData })
 			.then(function () {
@@ -346,7 +391,10 @@
 			nameTd.appendChild(link);
 			tr.appendChild(nameTd);
 
-			tr.appendChild(td(row.scan_status));
+			var statusTd = document.createElement("td");
+			statusTd.appendChild(buildStatusBadge(row.scan_status, row.confidence_score));
+			tr.appendChild(statusTd);
+
 			tr.appendChild(td(row.page_title || row.page_url));
 
 			tbody.appendChild(tr);

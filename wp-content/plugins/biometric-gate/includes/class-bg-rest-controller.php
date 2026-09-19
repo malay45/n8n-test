@@ -195,16 +195,25 @@ class BG_Rest_Controller {
 				// never a local network drop, which is handled entirely client-side and never
 				// reaches this branch since the browser itself can't reach us either in that case.
 				BG_Session::mark_verified( $user_id );
-				self::log( $user_id, 'cloud_bypass', $request );
+				self::log( $user_id, 'cloud_bypass', $request, null );
 				return new WP_REST_Response( array( 'status' => 'cloud_bypass' ), 200 );
 			}
 
-			self::log( $user_id, 'failure', $request );
+			self::log( $user_id, 'failure', $request, null );
 			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 401 ) );
 		}
 
+		if ( ! $result['pass'] ) {
+			self::log( $user_id, 'failure', $request, $result['score'] );
+			return new WP_Error(
+				'bg_no_match',
+				__( 'The live scan did not match the enrolled identity.', 'biometric-gate' ),
+				array( 'status' => 401 )
+			);
+		}
+
 		BG_Session::mark_verified( $user_id );
-		self::log( $user_id, 'success', $request );
+		self::log( $user_id, 'success', $request, $result['score'] );
 
 		return new WP_REST_Response(
 			array(
@@ -271,9 +280,9 @@ class BG_Rest_Controller {
 		return max( 0, $threshold - (int) $elapsed );
 	}
 
-	private static function log( $user_id, $status, WP_REST_Request $request ) {
+	private static function log( $user_id, $status, WP_REST_Request $request, $confidence_score = null ) {
 		$page_title = (string) $request->get_param( 'page_title' );
 		$page_url   = (string) $request->get_param( 'page_url' );
-		BG_Logs::insert( $user_id, $status, $page_title, $page_url );
+		BG_Logs::insert( $user_id, $status, $page_title, $page_url, $confidence_score );
 	}
 }

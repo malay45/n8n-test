@@ -43,6 +43,7 @@ register_activation_hook( BG_PLUGIN_FILE, array( 'BG_Activator', 'activate' ) );
 register_deactivation_hook( BG_PLUGIN_FILE, array( 'BG_Activator', 'deactivate' ) );
 
 add_filter( 'cron_schedules', array( 'BG_Activator', 'register_cron_schedules' ) );
+add_action( 'admin_init', array( 'BG_Activator', 'maybe_upgrade' ) );
 
 BG_Session::init();
 BG_Logs::init();

@@ -66,6 +66,7 @@ class BG_Activator {
 			scan_status VARCHAR(20) NOT NULL,
 			page_title VARCHAR(255) NOT NULL DEFAULT '',
 			page_url VARCHAR(500) NOT NULL DEFAULT '',
+			confidence_score DECIMAL(5,2) NULL,
 			created_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
 			KEY idx_user_time (user_id, created_at),
@@ -74,6 +75,22 @@ class BG_Activator {
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
+	}
+
+	const DB_VERSION_OPTION = 'bg_db_version';
+	const DB_VERSION        = 2; // Bumped when confidence_score was added to the schema.
+
+	/**
+	 * dbDelta() only runs on activation; an in-place plugin update (no deactivate/reactivate)
+	 * otherwise never re-creates the table to pick up new columns. Hooked from admin_init.
+	 */
+	public static function maybe_upgrade() {
+		if ( (int) get_option( self::DB_VERSION_OPTION, 0 ) >= self::DB_VERSION ) {
+			return;
+		}
+
+		self::create_table();
+		update_option( self::DB_VERSION_OPTION, self::DB_VERSION );
 	}
 
 	private static function maybe_set_default_options() {
