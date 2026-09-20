@@ -61,6 +61,21 @@ class BG_Frontend {
 				'guardWindowSec'   => (int) $settings['guard_window_secs'],
 				'noCameraMessage'  => wp_kses_post( $settings['no_camera_message'] ),
 				'isAdmin'          => current_user_can( 'manage_options' ),
+
+				// Only whether each anti-cheat check should even run client-side (gates whether
+				// the JS attaches that check at all). The actual logout-vs-redirect action for
+				// whichever one fires is resolved server-side from the same Tab B settings, in
+				// the /session/killswitch response — one source of truth, never duplicated here.
+				'killSwitchesEnabled' => array(
+					'virtualCamera' => BG_Settings::is_kill_switch_enabled( 'virtual_camera' ),
+					'domTamper'     => BG_Settings::is_kill_switch_enabled( 'dom_tamper' ),
+					'devtools'      => BG_Settings::is_kill_switch_enabled( 'devtools' ),
+				),
+
+				'blockDevtoolsShortcuts' => (bool) $settings['block_devtools_shortcuts'],
+				'blockedKeysCustom'      => wp_parse_list( $settings['blocked_keys_custom'] ),
+				'closeButtonRedirectUrl' => esc_url_raw( $settings['close_button_redirect_url'] ),
+
 				'i18n'             => array(
 					'startScan'      => __( 'Start Face Scan', 'biometric-gate' ),
 					'verifying'      => __( 'Verifying your identity…', 'biometric-gate' ),
@@ -69,6 +84,11 @@ class BG_Frontend {
 					'noEnrollment'   => __( 'No biometric profile is on file. Contact your administrator.', 'biometric-gate' ),
 					'connectionLost' => __( 'Your internet connection appears to be offline. Please reconnect to continue.', 'biometric-gate' ),
 					'tooDark'        => __( 'Environment Too Dark. Please turn on a light to continue.', 'biometric-gate' ),
+					'tooBright'      => __( 'Too much light/glare detected. Please reduce backlighting and try again.', 'biometric-gate' ),
+					'centerFace'     => __( 'Center your profile in the frame.', 'biometric-gate' ),
+					'moveCloser'     => __( 'Move closer to the lens.', 'biometric-gate' ),
+					'closeConfirm'   => __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' ),
+					'closeButton'    => __( 'Close', 'biometric-gate' ),
 				),
 			)
 		);

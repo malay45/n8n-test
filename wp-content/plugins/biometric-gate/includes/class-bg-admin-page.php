@@ -198,6 +198,12 @@ class BG_Admin_Page {
 				'faceio_app_id'       => isset( $_POST['faceio_app_id'] ) ? wp_unslash( $_POST['faceio_app_id'] ) : '',
 				'vault_dir_path'      => isset( $_POST['vault_dir_path'] ) ? wp_unslash( $_POST['vault_dir_path'] ) : '',
 				'min_confidence_percent' => isset( $_POST['min_confidence_percent'] ) ? wp_unslash( $_POST['min_confidence_percent'] ) : '',
+				'fail_action'         => isset( $_POST['fail_action'] ) ? wp_unslash( $_POST['fail_action'] ) : 'logout',
+				'fail_redirect_url'   => isset( $_POST['fail_redirect_url'] ) ? wp_unslash( $_POST['fail_redirect_url'] ) : '',
+				'close_button_redirect_url' => isset( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : '',
+				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
+				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
+				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -304,6 +310,79 @@ class BG_Admin_Page {
 					</td>
 				</tr>
 			</table>
+
+			<h2><?php esc_html_e( 'Granular Admin Controls, Kill-Switches & Redirection Router', 'biometric-gate' ); ?></h2>
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Biometric Fail Routing', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="radio" name="fail_action" value="logout" <?php checked( 'logout', $settings['fail_action'] ); ?> /> <?php esc_html_e( 'Logout on 3-strike failure', 'biometric-gate' ); ?></label><br>
+						<label><input type="radio" name="fail_action" value="redirect" <?php checked( 'redirect', $settings['fail_action'] ); ?> /> <?php esc_html_e( 'Redirect to a custom URL instead', 'biometric-gate' ); ?></label>
+						<p>
+							<input type="url" name="fail_redirect_url" placeholder="https://example.com/support" value="<?php echo esc_attr( $settings['fail_redirect_url'] ); ?>" class="regular-text" />
+						</p>
+						<p class="description"><?php esc_html_e( 'What happens when a student exhausts all 3 live-scan attempts. Redirect keeps them logged in (useful during testing so you are not repeatedly logged out).', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Granular Kill-Switch Settings', 'biometric-gate' ); ?></th>
+					<td>
+						<table class="widefat" style="max-width:720px;">
+							<thead>
+								<tr>
+									<th><?php esc_html_e( 'Anti-Cheat Check', 'biometric-gate' ); ?></th>
+									<th><?php esc_html_e( 'Enabled', 'biometric-gate' ); ?></th>
+									<th><?php esc_html_e( 'Action', 'biometric-gate' ); ?></th>
+									<th><?php esc_html_e( 'Redirect URL (if selected)', 'biometric-gate' ); ?></th>
+								</tr>
+							</thead>
+							<tbody>
+								<?php
+								$kill_switch_labels = array(
+									'virtual_camera' => __( 'Virtual Webcam Detected', 'biometric-gate' ),
+									'dom_tamper'      => __( 'Element Deletion / DOM Manipulation', 'biometric-gate' ),
+									'devtools'        => __( 'DevTools / Inspector Open (heuristic, best-effort)', 'biometric-gate' ),
+								);
+								foreach ( $kill_switch_labels as $ks_key => $ks_label ) :
+									$ks = isset( $settings['kill_switches'][ $ks_key ] ) ? $settings['kill_switches'][ $ks_key ] : array( 'enabled' => false, 'action' => 'logout', 'redirect_url' => '' );
+									?>
+									<tr>
+										<td><?php echo esc_html( $ks_label ); ?></td>
+										<td><input type="checkbox" name="kill_switches[<?php echo esc_attr( $ks_key ); ?>][enabled]" value="1" <?php checked( ! empty( $ks['enabled'] ) ); ?> /></td>
+										<td>
+											<select name="kill_switches[<?php echo esc_attr( $ks_key ); ?>][action]">
+												<option value="logout" <?php selected( 'logout', $ks['action'] ); ?>><?php esc_html_e( 'Logout', 'biometric-gate' ); ?></option>
+												<option value="redirect" <?php selected( 'redirect', $ks['action'] ); ?>><?php esc_html_e( 'Redirect', 'biometric-gate' ); ?></option>
+											</select>
+										</td>
+										<td><input type="url" name="kill_switches[<?php echo esc_attr( $ks_key ); ?>][redirect_url]" value="<?php echo esc_attr( $ks['redirect_url'] ); ?>" class="regular-text" /></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+						<p class="description"><?php esc_html_e( 'DevTools detection is a window-size heuristic and can misfire (e.g. a resized browser window) — left off by default for that reason.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Developer Tools & Input Disabling', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="block_devtools_shortcuts" value="1" <?php checked( ! empty( $settings['block_devtools_shortcuts'] ) ); ?> /> <?php esc_html_e( 'Block right-click and common DevTools keyboard shortcuts (F12, Ctrl/Cmd+Shift+I/J/C, Ctrl/Cmd+U)', 'biometric-gate' ); ?></label>
+						<p>
+							<label for="blocked_keys_custom"><?php esc_html_e( 'Additional keys to block (comma-separated, matching the browser key name, e.g. F11,Escape):', 'biometric-gate' ); ?></label><br>
+							<input type="text" name="blocked_keys_custom" id="blocked_keys_custom" value="<?php echo esc_attr( $settings['blocked_keys_custom'] ); ?>" class="regular-text" />
+						</p>
+						<p class="description"><?php esc_html_e( 'Deterrent only, not a real security boundary — some browser/OS-level shortcuts (e.g. Cmd+Option+I in Safari) are intercepted by the browser itself before a webpage can block them.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="close_button_redirect_url"><?php esc_html_e( 'Close Button Redirect URL', 'biometric-gate' ); ?></label></th>
+					<td>
+						<input type="url" name="close_button_redirect_url" id="close_button_redirect_url" placeholder="https://example.com/dashboard" value="<?php echo esc_attr( $settings['close_button_redirect_url'] ); ?>" class="regular-text" />
+						<p class="description"><?php esc_html_e( 'Where a student lands if they click Close on the scan overlay and confirm they want to leave. This never grants access to protected content — it only lets them exit gracefully.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+			</table>
+
 			<?php submit_button( __( 'Save Settings', 'biometric-gate' ) ); ?>
 		</form>
 		<?php

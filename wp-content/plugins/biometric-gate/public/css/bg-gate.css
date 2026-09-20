@@ -45,6 +45,35 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 	width: 100%;
 }
 
+.bg-gate-close-btn {
+	position: absolute;
+	top: 20px;
+	right: 20px;
+	appearance: none;
+	border: none;
+	border-radius: 999px;
+	background: #d63638;
+	color: #fff;
+	font-size: 0.9rem;
+	font-weight: 600;
+	padding: 8px 18px;
+	cursor: pointer;
+	z-index: 1;
+}
+
+.bg-gate-close-btn:active {
+	background: #b32d2e;
+}
+
+@media (max-width: 480px) {
+	.bg-gate-close-btn {
+		top: 12px;
+		right: 12px;
+		padding: 6px 14px;
+		font-size: 0.8rem;
+	}
+}
+
 .bg-gate-card h2 {
 	font-size: 1.25rem;
 	margin: 0 0 8px;

@@ -179,17 +179,24 @@ class BG_Admin_Rest_Controller {
 	}
 
 	public static function export_and_wipe( WP_REST_Request $request ) {
-		BG_Logs::run_export_and_wipe();
-		return new WP_REST_Response( array( 'status' => 'done' ), 200 );
+		$user_id      = absint( $request->get_param( 'user_id' ) );
+		$progress_key = $user_id > 0 ? ( 'bg_export_progress_wipe_user_' . $user_id ) : BG_Logs::PROGRESS_TRANSIENT;
+
+		// Scheduled off-request (not run inline here) so a large table's export/delete can
+		// never hit a PHP-FPM timeout or memory ceiling on the HTTP request that clicked the
+		// button (spec #9) — the admin dashboard polls export-progress for status instead.
+		wp_schedule_single_event( time(), 'bg_job_export_and_wipe', array( $user_id, $progress_key ) );
+
+		return new WP_REST_Response( array( 'status' => 'scheduled', 'progress_key' => $progress_key ), 202 );
 	}
 
 	public static function export_user( WP_REST_Request $request ) {
 		$user_id      = absint( $request->get_param( 'user_id' ) );
 		$progress_key = 'bg_export_progress_user_' . $user_id;
 
-		BG_Logs::run_export_user( $user_id, $progress_key );
+		wp_schedule_single_event( time(), 'bg_job_export_user', array( $user_id, $progress_key ) );
 
-		return new WP_REST_Response( array( 'status' => 'done', 'progress_key' => $progress_key ), 200 );
+		return new WP_REST_Response( array( 'status' => 'scheduled', 'progress_key' => $progress_key ), 202 );
 	}
 
 	public static function export_progress( WP_REST_Request $request ) {

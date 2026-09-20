@@ -9,6 +9,13 @@
  * uploaded photo instead requires a real image, so this captures a plain camera frame and
  * hands it to our own backend, which calls FaceIO's stateless `faceverify` REST endpoint
  * server-to-server (see class-bg-verification.php). The browser never decides "verified".
+ *
+ * "Real-time guidance & face normalization" (client QA round 2) is implemented the same
+ * way: FaceIO exposes no standalone alignment/normalization hook outside the full fio.js
+ * widget flow we deliberately don't use, so instead this requests a higher-resolution
+ * camera stream, center-crops the captured frame to the oval guide's aspect ratio (removing
+ * background noise), and applies a light contrast/brightness normalization before sending —
+ * a real, honest quality improvement rather than a FaceIO capability that doesn't exist here.
  */
 (function () {
 	'use strict';
@@ -25,27 +32,46 @@
 		return;
 	}
 
-	var overlayEl, videoEl, canvasEl, statusEl, startBtn;
+	var overlayEl, videoEl, canvasEl, statusEl, startBtn, closeBtn;
 	var currentTicket = null;
 	var retryCount = 0;
 	var intentionalHide = false;
 	var rescheduleTimer = null;
 	var reconnectPollTimer = null;
+	var mediaRescanTimer = null;
+	var devtoolsCheckTimer = null;
 	var pausedMedia = [];
 	var activeStream = null;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
-	var CAPTURE_WIDTH = 320;
-	var CAPTURE_HEIGHT = 240;
+
+	// Final submitted-frame size, portrait-oriented to match the oval guide mask. Bumped up
+	// from an earlier 320x240: low capture resolution was a real contributor to match
+	// confidence capping in the low 70s. The *source* stream itself is also requested at a
+	// higher resolution below (buildVideoConstraints) — enlarging just the canvas without a
+	// better source would only upscale, not add real detail.
+	var CAPTURE_WIDTH = 480;
+	var CAPTURE_HEIGHT = 600;
+
 	var DARKNESS_THRESHOLD = 40; // 0-255 average perceptual luminance; heuristic, tune after real-world testing.
+	var BRIGHTNESS_THRESHOLD = 235; // Overexposure/glare ceiling on the same 0-255 scale.
+	var DEVTOOLS_SIZE_THRESHOLD = 160; // px delta between outer/inner window — heuristic, imperfect by nature.
+	var MEDIA_RESCAN_INTERVAL_MS = 500; // Re-sweep for newly-added/reinitialized players while locked out.
 
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
 		buildOverlayScaffold();
 		observeTampering();
+		setupInputBlocking();
+		startDevtoolsWatch();
+		document.addEventListener('visibilitychange', onVisibilityChange);
 		runScanCycle();
+	}
+
+	function killSwitchEnabled(type) {
+		return !!(config.killSwitchesEnabled && config.killSwitchesEnabled[type]);
 	}
 
 	// ---------------------------------------------------------------------
@@ -60,6 +86,7 @@
 		overlayEl.hidden = true;
 
 		overlayEl.innerHTML =
+			'<button type="button" class="bg-gate-close-btn">' + (config.i18n.closeButton || 'Close') + '</button>' +
 			'<div class="bg-gate-card">' +
 			'<h2>' + config.i18n.startScan + '</h2>' +
 			'<p class="bg-gate-status" aria-live="polite"></p>' +
@@ -73,12 +100,14 @@
 		videoEl = overlayEl.querySelector('video');
 		statusEl = overlayEl.querySelector('.bg-gate-status');
 		startBtn = overlayEl.querySelector('.bg-gate-start-btn');
+		closeBtn = overlayEl.querySelector('.bg-gate-close-btn');
 
 		canvasEl = document.createElement('canvas');
 		canvasEl.width = CAPTURE_WIDTH;
 		canvasEl.height = CAPTURE_HEIGHT;
 
 		startBtn.addEventListener('click', onStartActionClick);
+		closeBtn.addEventListener('click', onCloseButtonClick);
 
 		if (config.isAdmin) {
 			var bypassBtn = overlayEl.querySelector('.bg-gate-dev-bypass-btn');
@@ -99,6 +128,26 @@
 		}
 	}
 
+	/**
+	 * Spec: Close halts the camera immediately, then confirms. Cancel reloads the page (a
+	 * one-click unfreeze for a locked-up mobile webcam stream); Continue routes the student
+	 * away from the lesson. This is never a verification bypass — it does not grant access to
+	 * protected content, only lets a stuck user leave gracefully instead of being trapped.
+	 */
+	function onCloseButtonClick() {
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
+		}
+
+		if (window.confirm(config.i18n.closeConfirm)) {
+			intentionalHide = true;
+			window.location.href = config.closeButtonRedirectUrl || '/';
+		} else {
+			window.location.reload();
+		}
+	}
+
 	function showOverlay() {
 		overlayEl.hidden = false;
 		setStatus('');
@@ -112,7 +161,18 @@
 
 		if (!isBlockingShell) {
 			document.documentElement.classList.add('bg-gate-blur-active');
+			exitNativeFullscreen();
+
+			pausedMedia = [];
 			pauseAllMedia();
+			if (mediaRescanTimer) {
+				window.clearInterval(mediaRescanTimer);
+			}
+			// A one-time sweep missed players that mount/reinitialize *after* the overlay
+			// opened (e.g. an autoplay-next-lesson video) — this keeps re-checking for as
+			// long as the lockout is showing, which is what "audio keeps playing in the
+			// background" during a scan traced back to.
+			mediaRescanTimer = window.setInterval(pauseAllMedia, MEDIA_RESCAN_INTERVAL_MS);
 		}
 	}
 
@@ -120,7 +180,13 @@
 		intentionalHide = true;
 		overlayEl.hidden = true;
 		document.documentElement.classList.remove('bg-gate-blur-active');
-		resumeAllMedia(); // Restore media state
+
+		if (mediaRescanTimer) {
+			window.clearInterval(mediaRescanTimer);
+			mediaRescanTimer = null;
+		}
+
+		resumeAllMedia();
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
@@ -128,6 +194,28 @@
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
+	}
+
+	/**
+	 * A CSS z-index can never beat a native-fullscreened element's browser-level top layer —
+	 * that's why the scan modal was opening *behind* a fullscreen lesson video. The only fix
+	 * is to force a real exit from fullscreen before showing the overlay.
+	 */
+	function exitNativeFullscreen() {
+		var fsElement = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+		if (!fsElement) {
+			return;
+		}
+
+		try {
+			if (document.exitFullscreen) {
+				document.exitFullscreen().catch(function () { /* noop */ });
+			} else if (document.webkitExitFullscreen) {
+				document.webkitExitFullscreen();
+			} else if (document.msExitFullscreen) {
+				document.msExitFullscreen();
+			}
+		} catch (e) { /* noop */ }
 	}
 
 	function setStatus(text, isHtml) {
@@ -140,7 +228,7 @@
 
 	function observeTampering() {
 		var observer = new MutationObserver(function () {
-			if (intentionalHide || !overlayEl) {
+			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl) {
 				return;
 			}
 			var stillPresent = document.body.contains(overlayEl);
@@ -155,20 +243,118 @@
 	}
 
 	/**
-	 * Deliberately targets only the generic <video>/<audio>/<iframe> web standards — no
-	 * PrestoPlayer-, YouTube-, or Vimeo-specific selectors or classes, per the spec's explicit
-	 * "no LearnDash/PrestoPlayer-specific code" portability rule (spec #1, #11). This keeps the
-	 * plugin a true drop-in on any WordPress site, though it means a media player whose actual
-	 * playback element isn't a plain <video>/<audio> tag may not always pause reliably — worth
-	 * a manual check on the real course pages this ships to.
+	 * Best-effort, heuristic DevTools-open detector: a docked devtools panel shrinks the
+	 * viewport relative to the outer window. This is imperfect by nature (undocked/separate-
+	 * window devtools, or a resized browser window on its own, can both evade or false-
+	 * positive it) — defaults OFF in Tab B for exactly that reason.
+	 */
+	function startDevtoolsWatch() {
+		if (!killSwitchEnabled('devtools') || devtoolsCheckTimer) {
+			return;
+		}
+
+		devtoolsCheckTimer = window.setInterval(function () {
+			var widthDelta = window.outerWidth - window.innerWidth;
+			var heightDelta = window.outerHeight - window.innerHeight;
+
+			if (widthDelta > DEVTOOLS_SIZE_THRESHOLD || heightDelta > DEVTOOLS_SIZE_THRESHOLD) {
+				window.clearInterval(devtoolsCheckTimer);
+				devtoolsCheckTimer = null;
+				killSwitch('devtools_detected');
+			}
+		}, 1000);
+	}
+
+	/**
+	 * Deterrent only — right-click/F12/common devtools shortcuts and an admin-defined custom
+	 * key list get preventDefault()'d. This is friction against casual snooping, not a real
+	 * security boundary (the deny-by-default server-side content guard is); browser-chrome-
+	 * level shortcuts some OS/browser combinations reserve before JS ever sees them (e.g.
+	 * Cmd+Option+I in Safari) can't be intercepted from a webpage at all.
+	 */
+	function setupInputBlocking() {
+		if (!config.blockDevtoolsShortcuts) {
+			return;
+		}
+
+		document.addEventListener('contextmenu', function (e) {
+			e.preventDefault();
+		});
+
+		var blockedCombos = [
+			{ key: 'F12' },
+			{ key: 'I', ctrl: true, shift: true },
+			{ key: 'J', ctrl: true, shift: true },
+			{ key: 'C', ctrl: true, shift: true },
+			{ key: 'U', ctrl: true },
+		];
+		var customKeys = (config.blockedKeysCustom || []).map(function (k) {
+			return String(k).toUpperCase();
+		});
+
+		document.addEventListener('keydown', function (e) {
+			var key = (e.key || '').toUpperCase();
+
+			var comboMatch = blockedCombos.some(function (combo) {
+				if (combo.key.toUpperCase() !== key) {
+					return false;
+				}
+				if (combo.ctrl && !(e.ctrlKey || e.metaKey)) {
+					return false;
+				}
+				if (combo.shift && !e.shiftKey) {
+					return false;
+				}
+				return true;
+			});
+
+			if (comboMatch || customKeys.indexOf(key) !== -1) {
+				e.preventDefault();
+			}
+		});
+	}
+
+	/**
+	 * Recovers a scan that was mid-flight when the tab/app was backgrounded: on iOS
+	 * specifically, a camera stream commonly dies while the page is hidden, and drawing from
+	 * a dead/stale video element produced both a visual freeze and a false "Environment Too
+	 * Dark" (a black stale frame reads as near-zero luminance). Dropping the dead stream and
+	 * resetting to the Start button lets the student cleanly re-trigger instead of being stuck.
+	 */
+	function onVisibilityChange() {
+		if (document.hidden || !activeStream) {
+			return;
+		}
+
+		var stillLive = activeStream.getVideoTracks().every(function (t) {
+			return 'live' === t.readyState;
+		});
+
+		if (!stillLive) {
+			stopStream(activeStream);
+			activeStream = null;
+
+			if (overlayEl && !overlayEl.hidden) {
+				setStatus('');
+				startBtn.disabled = false;
+				startBtn.hidden = false;
+			}
+		}
+	}
+
+	/**
+	 * Continuously (not just once) targets only the generic <video>/<audio>/<iframe> web
+	 * standards — no PrestoPlayer-, YouTube-, or Vimeo-specific selectors or classes, per the
+	 * spec's "no LearnDash/PrestoPlayer-specific code" portability rule. Called repeatedly via
+	 * mediaRescanTimer while the overlay is open (see showOverlay), not just once at open time,
+	 * so a player that mounts or resumes mid-lockout still gets caught and paused.
 	 */
 	function pauseAllMedia() {
-		pausedMedia = [];
 		var mediaElements = document.querySelectorAll('video, audio');
 		mediaElements.forEach(function (el) {
 			try {
 				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
-				if (isPlaying) {
+				if (isPlaying && -1 === pausedMedia.indexOf(el)) {
 					pausedMedia.push(el);
 				}
 				if (typeof el.pause === 'function') {
@@ -247,31 +433,54 @@
 			preferred = window.localStorage.getItem('bg_preferred_camera_id');
 		} catch (e) { /* localStorage unavailable — fall back to default camera. */ }
 
-		return preferred ? { deviceId: { exact: preferred } } : true;
+		// ideal (not exact/min) resolution: the browser targets this but gracefully degrades
+		// on hardware that can't provide it, rather than failing outright. A higher-quality
+		// source stream is what actually improves FaceIO's match confidence — enlarging just
+		// the output canvas without this would only upscale a low-res source.
+		var constraints = {
+			width: { ideal: 1280 },
+			height: { ideal: 960 },
+		};
+
+		if (preferred) {
+			constraints.deviceId = { exact: preferred };
+		}
+
+		return constraints;
 	}
 
 	/**
-	 * Device-label auditing runs *after* getUserMedia grants permission, not before: browsers
-	 * withhold device labels entirely pre-permission, so every legitimate first-time visitor
-	 * would show empty labels and false-positive a kill-switch if audited first.
+	 * Device-label auditing runs *after* getUserMedia grants permission and inspects only the
+	 * device actually backing this live stream (via the track's own label) — not every
+	 * camera-like device enumerable on the system. Auditing the whole device list previously
+	 * flagged any Mac with something like OBS merely *installed* (even idle, unused) and
+	 * killed the session before the video ever appeared, which is what desktop Mac/Chrome and
+	 * Safari testing was consistently hitting.
 	 */
 	function auditDevicesThenCapture(stream) {
-		return navigator.mediaDevices.enumerateDevices().then(function (devices) {
-			var videoInputs = devices.filter(function (d) { return 'videoinput' === d.kind; });
+		if (killSwitchEnabled('virtualCamera')) {
+			var videoTrack = stream.getVideoTracks()[0];
+			var activeLabel = ((videoTrack && videoTrack.label) || '').trim().toLowerCase();
 
-			var suspicious = videoInputs.some(function (d) {
-				var label = (d.label || '').trim().toLowerCase();
-				return '' === label || VIRTUAL_CAMERA_PATTERN.test(label);
-			});
-
-			if (suspicious) {
+			if ('' === activeLabel || VIRTUAL_CAMERA_PATTERN.test(activeLabel)) {
 				stopStream(stream);
 				killSwitch('virtual_camera_detected');
-				return;
+				return Promise.resolve();
 			}
+		}
 
-			activeStream = stream;
-			return captureAndSubmit(stream, true);
+		activeStream = stream;
+		watchStreamLifecycle(stream);
+		return captureAndSubmit(stream, true);
+	}
+
+	function watchStreamLifecycle(stream) {
+		stream.getVideoTracks().forEach(function (track) {
+			track.onended = function () {
+				if (activeStream === stream) {
+					activeStream = null;
+				}
+			};
 		});
 	}
 
@@ -279,7 +488,7 @@
 	 * Grid-sampled (every 10th pixel, not every pixel) average perceptual luminance of the
 	 * already-drawn canvas frame — cheap enough to run on every capture attempt.
 	 */
-	function isFrameTooDark(ctx) {
+	function measureAverageLuminance(ctx) {
 		var data = ctx.getImageData(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT).data;
 		var total = 0;
 		var count = 0;
@@ -289,8 +498,31 @@
 			count++;
 		}
 
-		var average = count > 0 ? (total / count) : 255;
-		return average < DARKNESS_THRESHOLD;
+		return count > 0 ? (total / count) : 255;
+	}
+
+	/**
+	 * Draws the live video into the capture canvas, center-cropped to the oval guide's
+	 * portrait aspect ratio (so background noise outside the guide never reaches FaceIO) and
+	 * with a light contrast/brightness normalization applied — the honest, implementable
+	 * stand-in for "face normalization" described in the class docblock above.
+	 */
+	function drawNormalizedFrame(ctx) {
+		var videoW = videoEl.videoWidth || CAPTURE_WIDTH;
+		var videoH = videoEl.videoHeight || CAPTURE_HEIGHT;
+		var targetAspect = CAPTURE_WIDTH / CAPTURE_HEIGHT;
+
+		var srcW = Math.min(videoW, videoH * targetAspect);
+		var srcH = Math.min(videoH, videoW / targetAspect);
+		var srcX = (videoW - srcW) / 2;
+		var srcY = (videoH - srcH) / 2;
+
+		ctx.clearRect(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+		// Unsupported browsers simply ignore an unrecognized filter value rather than
+		// throwing, so this degrades gracefully on older WebKit builds.
+		ctx.filter = 'contrast(1.1) brightness(1.05) saturate(1.05)';
+		ctx.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+		ctx.filter = 'none';
 	}
 
 	function captureAndSubmit(stream, isFirstTime) {
@@ -299,13 +531,16 @@
 		}
 
 		return new Promise(function (resolve) {
-			var takePicture = function() {
+			var takePicture = function () {
 				setStatus(config.i18n.verifying || "Verifying...");
-				var ctx = canvasEl.getContext('2d');
-				ctx.drawImage(videoEl, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
 
-				if (isFrameTooDark(ctx)) {
-					// Never reaches FACEIO, so this doesn't count as one of the 3 strikes —
+				var ctx = canvasEl.getContext('2d');
+				drawNormalizedFrame(ctx);
+
+				var luminance = measureAverageLuminance(ctx);
+
+				if (luminance < DARKNESS_THRESHOLD) {
+					// Never reaches FaceIO, so this doesn't count as one of the 3 strikes —
 					// the user just needs better lighting and can hit Start Face Scan again.
 					setStatus(config.i18n.tooDark || 'Environment Too Dark. Please turn on a light to continue.');
 					startBtn.disabled = false;
@@ -313,7 +548,14 @@
 					return;
 				}
 
-				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.85);
+				if (luminance > BRIGHTNESS_THRESHOLD) {
+					setStatus(config.i18n.tooBright || 'Too much light/glare detected.');
+					startBtn.disabled = false;
+					startBtn.hidden = false;
+					return;
+				}
+
+				var dataUrl = canvasEl.toDataURL('image/jpeg', 0.9);
 				var base64 = dataUrl.split(',')[1] || '';
 
 				resolve(
@@ -329,11 +571,17 @@
 			if (isFirstTime) {
 				videoEl.onloadeddata = function () {
 					var countdown = 3;
-					setStatus("Align your face... " + countdown);
-					var interval = setInterval(function() {
+					var guidance = [config.i18n.centerFace, config.i18n.moveCloser];
+					var guidanceIndex = 0;
+
+					setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
+
+					var interval = setInterval(function () {
 						countdown--;
+						guidanceIndex = (guidanceIndex + 1) % guidance.length;
+
 						if (countdown > 0) {
-							setStatus("Align your face... " + countdown);
+							setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
 						} else {
 							clearInterval(interval);
 							takePicture();
@@ -452,21 +700,38 @@
 		runScanCycle();
 	}
 
+	/**
+	 * The admin-configured action for whichever violation fired (Tab B: the 3-strike
+	 * "Biometric Fail Routing" box for max_retries_exceeded, or the per-type kill-switch grid
+	 * for everything else) is resolved server-side and returned here — this never guesses or
+	 * duplicates that logic client-side, so there is exactly one source of truth.
+	 */
 	function killSwitch(reason) {
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
 		}
-		var redirected = false;
-		var goHome = function () {
-			if (redirected) {
+
+		var navigated = false;
+		var navigateAway = function (redirectUrl) {
+			if (navigated) {
 				return;
 			}
-			redirected = true;
-			window.location.href = '/';
+			navigated = true;
+			window.location.href = redirectUrl || '/';
 		};
-		apiPost('/session/killswitch', { reason: reason }).then(goHome).catch(goHome);
-		window.setTimeout(goHome, 3000);
+
+		apiPost('/session/killswitch', { reason: reason })
+			.then(function (res) {
+				navigateAway(res && res.redirect_url);
+			})
+			.catch(function () {
+				navigateAway(null);
+			});
+
+		window.setTimeout(function () {
+			navigateAway(null);
+		}, 3000);
 	}
 
 	function apiPost(path, body) {
