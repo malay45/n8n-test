@@ -28,6 +28,35 @@ class BG_Settings {
 			'faceio_app_id'       => '',
 			'vault_dir_path'      => self::default_vault_dir(),
 			'min_confidence_percent' => 92,
+
+			// 3-strike biometric failure routing (distinct from the anti-cheat kill-switch grid
+			// below — this is specifically "ran out of retries on a genuine non-match").
+			'fail_action'         => 'logout', // 'logout' | 'redirect'
+			'fail_redirect_url'   => '',
+
+			// The "Close" escape-hatch button's Continue destination (spec: lets a stuck user
+			// leave gracefully without granting access — never a bypass into protected content).
+			'close_button_redirect_url' => '',
+
+			// Per-violation-type anti-cheat toggles. devtools defaults OFF since window-size-based
+			// detection is a best-effort heuristic (see bg-gate.js) with real false-positive risk.
+			'kill_switches'       => self::default_kill_switches(),
+
+			// Deterrent-only keyboard/context-menu blocking — never a real security boundary
+			// (deny-by-default content guard is), just friction against casual snooping.
+			'block_devtools_shortcuts' => false,
+			'blocked_keys_custom'      => '',
+		);
+	}
+
+	/**
+	 * @return array<string,array{enabled:bool,action:string,redirect_url:string}>
+	 */
+	public static function default_kill_switches() {
+		return array(
+			'virtual_camera' => array( 'enabled' => true, 'action' => 'logout', 'redirect_url' => '' ),
+			'dom_tamper'     => array( 'enabled' => true, 'action' => 'logout', 'redirect_url' => '' ),
+			'devtools'       => array( 'enabled' => false, 'action' => 'logout', 'redirect_url' => '' ),
 		);
 	}
 
@@ -145,6 +174,45 @@ class BG_Settings {
 		}
 		$clean['min_confidence_percent'] = $confidence;
 
+		$clean['fail_action'] = ( isset( $input['fail_action'] ) && 'redirect' === $input['fail_action'] ) ? 'redirect' : 'logout';
+		$clean['fail_redirect_url'] = isset( $input['fail_redirect_url'] )
+			? esc_url_raw( wp_unslash( $input['fail_redirect_url'] ) )
+			: '';
+
+		$clean['close_button_redirect_url'] = isset( $input['close_button_redirect_url'] )
+			? esc_url_raw( wp_unslash( $input['close_button_redirect_url'] ) )
+			: '';
+
+		$clean['kill_switches'] = self::sanitize_kill_switches(
+			isset( $input['kill_switches'] ) && is_array( $input['kill_switches'] ) ? $input['kill_switches'] : array()
+		);
+
+		$clean['block_devtools_shortcuts'] = ! empty( $input['block_devtools_shortcuts'] );
+		$clean['blocked_keys_custom'] = isset( $input['blocked_keys_custom'] )
+			? sanitize_text_field( wp_unslash( $input['blocked_keys_custom'] ) )
+			: '';
+
+		return $clean;
+	}
+
+	/**
+	 * @param array $input Raw per-type kill-switch config, e.g. from a JSON-decoded REST body
+	 *                      or the Tab B form's array-shaped field names.
+	 * @return array<string,array{enabled:bool,action:string,redirect_url:string}>
+	 */
+	private static function sanitize_kill_switches( array $input ) {
+		$clean = array();
+
+		foreach ( self::default_kill_switches() as $key => $defaults ) {
+			$row = isset( $input[ $key ] ) && is_array( $input[ $key ] ) ? $input[ $key ] : array();
+
+			$clean[ $key ] = array(
+				'enabled'      => ! empty( $row['enabled'] ),
+				'action'       => ( isset( $row['action'] ) && 'redirect' === $row['action'] ) ? 'redirect' : 'logout',
+				'redirect_url' => isset( $row['redirect_url'] ) ? esc_url_raw( wp_unslash( (string) $row['redirect_url'] ) ) : '',
+			);
+		}
+
 		return $clean;
 	}
 
@@ -185,5 +253,51 @@ class BG_Settings {
 
 	public static function get_min_confidence_percent() {
 		return (int) self::get()['min_confidence_percent'];
+	}
+
+	/**
+	 * Resolve what should happen for a given violation reason — the 3-strike biometric
+	 * failure has its own dedicated setting (fail_action/fail_redirect_url), separate from the
+	 * per-type anti-cheat kill-switch grid (virtual_camera/dom_tamper/devtools). Anything
+	 * unrecognized falls back to a hard logout, matching the plugin's original behavior.
+	 *
+	 * @param string $reason e.g. 'max_retries_exceeded', 'virtual_camera_detected', 'overlay_tampered', 'devtools_detected'.
+	 * @return array{action:string,redirect_url:string}
+	 */
+	public static function resolve_violation_action( $reason ) {
+		$settings = self::get();
+
+		if ( 'max_retries_exceeded' === $reason ) {
+			return array(
+				'action'       => $settings['fail_action'],
+				'redirect_url' => $settings['fail_redirect_url'],
+			);
+		}
+
+		$type_map = array(
+			'virtual_camera_detected' => 'virtual_camera',
+			'overlay_tampered'        => 'dom_tamper',
+			'devtools_detected'       => 'devtools',
+		);
+
+		$key = isset( $type_map[ $reason ] ) ? $type_map[ $reason ] : null;
+
+		if ( $key && isset( $settings['kill_switches'][ $key ] ) ) {
+			return array(
+				'action'       => $settings['kill_switches'][ $key ]['action'],
+				'redirect_url' => $settings['kill_switches'][ $key ]['redirect_url'],
+			);
+		}
+
+		return array( 'action' => 'logout', 'redirect_url' => '' );
+	}
+
+	/**
+	 * @param string $type 'virtual_camera' | 'dom_tamper' | 'devtools'.
+	 * @return bool Whether that specific anti-cheat check is currently active.
+	 */
+	public static function is_kill_switch_enabled( $type ) {
+		$switches = self::get()['kill_switches'];
+		return isset( $switches[ $type ] ) && ! empty( $switches[ $type ]['enabled'] );
 	}
 }

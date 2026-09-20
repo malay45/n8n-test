@@ -239,12 +239,15 @@ class BG_Rest_Controller {
 	}
 
 	/**
-	 * Spec #7's safety kill-switch: called on 3-strike failure, manual modal close, DevTools
-	 * tampering, or a detected virtual-camera signature. Invalidates the session server-side
-	 * and logs the user out; the frontend performs the hard redirect after this resolves.
+	 * Spec #7's safety kill-switch: called on 3-strike failure, DevTools tampering, or a
+	 * detected virtual-camera signature. The admin-configured action per violation type
+	 * (Tab B) decides whether this also forces a logout or just clears the verified-session
+	 * flag and sends the browser to a redirect URL — either way, the student is no longer
+	 * considered verified and content-guard will re-block on their next protected page load.
 	 */
 	public static function kill_switch( WP_REST_Request $request ) {
 		$user_id = get_current_user_id();
+		$reason  = (string) $request->get_param( 'reason' );
 
 		self::log( $user_id, 'failure', $request );
 		BG_Session::clear( $user_id );
@@ -254,11 +257,25 @@ class BG_Rest_Controller {
 		 * transient state via its own documented hook, without this plugin reaching into
 		 * another plugin's tables directly (spec #11's isolation rule).
 		 */
-		do_action( 'bg_kill_switch_triggered', $user_id );
+		do_action( 'bg_kill_switch_triggered', $user_id, $reason );
 
-		wp_logout();
+		$resolved = BG_Settings::resolve_violation_action( $reason );
 
-		return new WP_REST_Response( array( 'status' => 'logged_out' ), 200 );
+		// "Redirect" is an alternative to logout, not an addition to it — the whole point
+		// (per the client's own framing) is so an admin testing repeatedly isn't forced to
+		// log back in every time a kill-switch fires.
+		if ( 'redirect' !== $resolved['action'] ) {
+			wp_logout();
+		}
+
+		return new WP_REST_Response(
+			array(
+				'status'       => 'redirect' === $resolved['action'] ? 'redirected' : 'logged_out',
+				'action'       => $resolved['action'],
+				'redirect_url' => $resolved['redirect_url'],
+			),
+			200
+		);
 	}
 
 	public static function session_status( WP_REST_Request $request ) {

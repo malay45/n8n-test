@@ -23,7 +23,7 @@ class BG_Logs
 	{
 		add_action('bg_recurring_export_compile', array(__CLASS__, 'run_periodic_export'));
 		add_action('bg_recurring_retention_prune', array(__CLASS__, 'run_retention_prune'));
-		add_action('bg_job_export_and_wipe', array(__CLASS__, 'run_export_and_wipe'));
+		add_action('bg_job_export_and_wipe', array(__CLASS__, 'run_export_and_wipe'), 10, 2);
 		add_action('bg_job_export_user', array(__CLASS__, 'run_export_user'), 10, 2);
 	}
 
@@ -248,20 +248,37 @@ class BG_Logs
 	// ---------------------------------------------------------------------
 
 	/**
-	 * Tab C's "Export & Wipe Live Logs": compile everything to CSV, confirm it's on disk,
-	 * then TRUNCATE. Queued via wp_schedule_single_event() so it runs outside the HTTP
-	 * request that clicked the button (spec #9's memory-crash guard).
+	 * Tab C's "Export & Wipe Live Logs": compile to CSV, confirm it's on disk, then delete.
+	 * Queued via wp_schedule_single_event() so it runs outside the HTTP request that clicked
+	 * the button (spec #9's memory-crash guard).
+	 *
+	 * $user_id scopes BOTH the export and the deletion to one student when Tab C's log view
+	 * is filtered to them — without this, clicking the button while filtered to a single user
+	 * still wiped every user's rows via a blanket TRUNCATE, which is the exact "structural
+	 * data leak" the client's QA pass flagged. 0 (unfiltered) preserves the original
+	 * whole-table TRUNCATE behavior.
+	 *
+	 * @param int         $user_id
+	 * @param string|null $progress_key
 	 */
-	public static function run_export_and_wipe()
+	public static function run_export_and_wipe($user_id = 0, $progress_key = null)
 	{
 		global $wpdb;
 
-		$filepath = self::backup_filepath('biometric-logs-manual-export');
-		$written  = self::export_to_csv($filepath, 0, self::PROGRESS_TRANSIENT);
+		$user_id      = absint($user_id);
+		$progress_key = $progress_key ? $progress_key : self::PROGRESS_TRANSIENT;
+
+		$prefix   = $user_id > 0 ? ('biometric-logs-wipe-user-' . $user_id) : 'biometric-logs-manual-export';
+		$filepath = self::backup_filepath($prefix);
+		$written  = self::export_to_csv($filepath, $user_id, $progress_key);
 
 		if (file_exists($filepath) && filesize($filepath) > 0) {
 			$table = BG_Activator::table_name();
-			$wpdb->query("TRUNCATE TABLE {$table}"); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- hardcoded table name.
+			if ($user_id > 0) {
+				$wpdb->delete($table, array('user_id' => $user_id), array('%d'));
+			} else {
+				$wpdb->query("TRUNCATE TABLE {$table}"); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- hardcoded table name.
+			}
 		}
 
 		return $written;

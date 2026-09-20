@@ -316,14 +316,18 @@
 	};
 
 	function renderLogsTab() {
+		var wipeLabel = logsState.user_id
+			? "Export &amp; Wipe This Student's Logs"
+			: "Export &amp; Wipe Live Logs";
+
 		root.innerHTML =
 			'<div class="bg-admin-toolbar">' +
 			'<input type="search" id="bg-log-search" placeholder="Search by user name…" class="regular-text">' +
-			'<button type="button" class="button" id="bg-log-sort-toggle">Toggle Name / Time Sort</button>' +
+			'<button type="button" class="button" id="bg-log-sort-toggle"></button>' +
 			(logsState.user_id
 				? '<button type="button" class="button" id="bg-log-clear-filter">Clear User Filter</button>'
 				: "") +
-			'<button type="button" class="button button-primary" id="bg-export-wipe">Export &amp; Wipe Live Logs</button>' +
+			'<button type="button" class="button button-primary" id="bg-export-wipe">' + wipeLabel + '</button>' +
 			'<span id="bg-export-wipe-status"></span>' +
 			"</div>" +
 			'<table class="widefat striped"><thead><tr><th>Timestamp</th><th>User</th><th>Status</th><th>Page</th></tr></thead><tbody id="bg-log-rows"></tbody></table>' +
@@ -340,12 +344,25 @@
 			}, 300),
 		);
 
-		document
-			.getElementById("bg-log-sort-toggle")
-			.addEventListener("click", function () {
-				logsState.orderby = "time" === logsState.orderby ? "name" : "time";
-				loadLogs();
-			});
+		var sortBtn = document.getElementById("bg-log-sort-toggle");
+		updateSortButtonLabel(sortBtn);
+		sortBtn.addEventListener("click", function () {
+			// Time -> Name A-Z -> Name Z-A -> back to Time, each visually distinct so it's
+			// obvious the click actually did something (unlike a bare orderby toggle, which
+			// always sorted descending and could look like nothing happened).
+			if ("time" === logsState.orderby) {
+				logsState.orderby = "name";
+				logsState.order = "ASC";
+			} else if ("name" === logsState.orderby && "ASC" === logsState.order) {
+				logsState.order = "DESC";
+			} else {
+				logsState.orderby = "time";
+				logsState.order = "DESC";
+			}
+			updateSortButtonLabel(sortBtn);
+			logsState.page = 1;
+			loadLogs();
+		});
 
 		var clearBtn = document.getElementById("bg-log-clear-filter");
 		if (clearBtn) {
@@ -360,6 +377,14 @@
 
 		loadLogs();
 		loadBackups();
+	}
+
+	function updateSortButtonLabel(btn) {
+		if ("name" === logsState.orderby) {
+			btn.textContent = "Sort: Name (" + ("ASC" === logsState.order ? "A→Z" : "Z→A") + ") — click for Time";
+		} else {
+			btn.textContent = "Sort: Time (Newest First) — click for Name";
+		}
 	}
 
 	function loadLogs() {
@@ -446,25 +471,33 @@
 	}
 
 	function onExportWipeClick() {
-		if (!window.confirm(cfg.i18n.confirmExportWipe)) {
+		var confirmMsg = logsState.user_id
+			? "This will export this student's log rows to a CSV backup, then permanently erase them. Continue?"
+			: cfg.i18n.confirmExportWipe;
+
+		if (!window.confirm(confirmMsg)) {
 			return;
 		}
 
 		var status = document.getElementById("bg-export-wipe-status");
 		status.textContent = cfg.i18n.exporting;
 
-		apiFetch("/admin/export-wipe", { method: "POST" })
-			.then(function () {
+		apiFetch("/admin/export-wipe", {
+			method: "POST",
+			body: { user_id: logsState.user_id || 0 },
+		})
+			.then(function (res) {
+				var key = res.progress_key;
 				var interval = window.setInterval(function () {
-					apiFetch("/admin/export-progress").then(function (progress) {
+					apiFetch("/admin/export-progress?key=" + encodeURIComponent(key)).then(function (progress) {
 						if ("done" === progress.status) {
 							window.clearInterval(interval);
 							status.textContent = cfg.i18n.done;
 							loadLogs();
 							loadBackups();
-						} else if ('error' === progress.status) {
+						} else if ("error" === progress.status) {
 							window.clearInterval(interval);
-							status.textContent = 'Error: ' + (progress.message || 'Export failed.');
+							status.textContent = "Error: " + (progress.message || "Export failed.");
 						}
 					});
 				}, 1500);

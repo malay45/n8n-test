@@ -26,7 +26,11 @@ defined( 'ABSPATH' ) || exit;
 class BG_Enrollment {
 
 	const META_REFERENCE_PATH   = '_secure_face_reference_path'; // Encrypted absolute path to a vault file.
-	const MAX_UPLOAD_BYTES      = 8 * MB_IN_BYTES;
+	// Raw smartphone photos run up to ~30MB before this pipeline's own compression shrinks them
+	// to a small final JPEG — 64MB gives real headroom above that. Matching server-side PHP
+	// limits (upload_max_filesize/post_max_size) must also be raised; this constant alone can't
+	// override those, since PHP rejects an oversized upload before our code ever runs.
+	const MAX_UPLOAD_BYTES      = 64 * MB_IN_BYTES;
 	const ALLOWED_MIME_TYPES    = array( 'image/jpeg', 'image/png' );
 
 	const UPLOAD_TYPE_OFFICIAL_ID    = 'official_id';
@@ -251,6 +255,20 @@ class BG_Enrollment {
 	// ---------------------------------------------------------------------
 
 	private static function validate_upload( array $file ) {
+		// Checked before the tmp_name/is_uploaded_file check below: when PHP itself rejects an
+		// oversized upload (upload_max_filesize), tmp_name is already empty and the generic
+		// "no file received" message would otherwise mask the real, actionable cause.
+		if ( isset( $file['error'] ) && in_array( $file['error'], array( UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE ), true ) ) {
+			return new WP_Error(
+				'bg_upload_exceeds_server_limit',
+				sprintf(
+					/* translators: %s: this server's current upload_max_filesize/post_max_size, e.g. "8M" */
+					__( "This file is larger than the server's upload limit (currently %s). Raise upload_max_filesize and post_max_size in the Cloudways PHP settings panel to at least 64M, or compress the photo before uploading.", 'biometric-gate' ),
+					ini_get( 'upload_max_filesize' )
+				)
+			);
+		}
+
 		if ( empty( $file['tmp_name'] ) || ! is_uploaded_file( $file['tmp_name'] ) ) {
 			return new WP_Error( 'bg_no_file', __( 'No valid uploaded file was received.', 'biometric-gate' ) );
 		}
@@ -260,7 +278,14 @@ class BG_Enrollment {
 		}
 
 		if ( $file['size'] > self::MAX_UPLOAD_BYTES ) {
-			return new WP_Error( 'bg_file_too_large', __( 'The uploaded photo is too large (8MB max).', 'biometric-gate' ) );
+			return new WP_Error(
+				'bg_file_too_large',
+				sprintf(
+					/* translators: %d: max upload size in megabytes */
+					__( 'The uploaded photo is too large (%dMB max).', 'biometric-gate' ),
+					(int) round( self::MAX_UPLOAD_BYTES / MB_IN_BYTES )
+				)
+			);
 		}
 
 		$filetype = wp_check_filetype_and_ext( $file['tmp_name'], $file['name'] );
