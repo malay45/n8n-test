@@ -200,7 +200,7 @@ class BG_Admin_Page {
 				'min_confidence_percent' => isset( $_POST['min_confidence_percent'] ) ? wp_unslash( $_POST['min_confidence_percent'] ) : '',
 				'fail_action'         => isset( $_POST['fail_action'] ) ? wp_unslash( $_POST['fail_action'] ) : 'logout',
 				'fail_redirect_url'   => isset( $_POST['fail_redirect_url'] ) ? wp_unslash( $_POST['fail_redirect_url'] ) : '',
-				'close_button_redirect_url' => isset( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : '',
+				'close_button_redirect_url' => ! empty( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : home_url(),
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
 				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',

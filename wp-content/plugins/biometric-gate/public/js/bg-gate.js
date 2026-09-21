@@ -54,7 +54,7 @@
 	var CAPTURE_WIDTH = 480;
 	var CAPTURE_HEIGHT = 600;
 
-	var DARKNESS_THRESHOLD = 40; // 0-255 average perceptual luminance; heuristic, tune after real-world testing.
+	var DARKNESS_THRESHOLD = 10; // Bumped slightly to 10, but 40 is too strict.
 	var BRIGHTNESS_THRESHOLD = 235; // Overexposure/glare ceiling on the same 0-255 scale.
 	var DEVTOOLS_SIZE_THRESHOLD = 160; // px delta between outer/inner window — heuristic, imperfect by nature.
 	var MEDIA_RESCAN_INTERVAL_MS = 500; // Re-sweep for newly-added/reinitialized players while locked out.
@@ -350,8 +350,12 @@
 	 * so a player that mounts or resumes mid-lockout still gets caught and paused.
 	 */
 	function pauseAllMedia() {
-		var mediaElements = document.querySelectorAll('video, audio');
+		// Include Presto Player web components in the media element query
+		var mediaElements = document.querySelectorAll('video, audio, presto-player, presto-youtube, presto-vimeo, presto-video');
 		mediaElements.forEach(function (el) {
+			if (el === videoEl) {
+				return;
+			}
 			try {
 				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
 				if (isPlaying && -1 === pausedMedia.indexOf(el)) {
@@ -366,6 +370,8 @@
 			try {
 				frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
 				frame.contentWindow.postMessage(JSON.stringify({ method: 'pause' }), '*');
+				frame.contentWindow.postMessage('{"method":"pause"}', '*');
+				frame.contentWindow.postMessage('pause', '*');
 			} catch (e) { /* skip */ }
 		});
 	}
@@ -416,6 +422,20 @@
 		}
 
 		startBtn.disabled = true;
+
+		// CRITICAL FIX: If a stream exists but the video element is not playing or 
+		// the stream is dead, stop it and request a fresh one.
+		if (activeStream) {
+			var isStreamLive = activeStream.getVideoTracks().every(function (t) {
+				return 'live' === t.readyState;
+			});
+
+			// If the stream is dead or the video element is not rendering, kill it.
+			if (!isStreamLive || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+				stopStream(activeStream);
+				activeStream = null;
+			}
+		}
 
 		if (activeStream) {
 			captureAndSubmit(activeStream, false);
@@ -489,7 +509,13 @@
 	 * already-drawn canvas frame — cheap enough to run on every capture attempt.
 	 */
 	function measureAverageLuminance(ctx) {
-		var data = ctx.getImageData(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT).data;
+		// Sample only the center 50% of the frame to prevent dark backgrounds 
+		// or letterboxing black bars from skewing the average, guaranteeing we measure the face!
+		var w = CAPTURE_WIDTH * 0.5;
+		var h = CAPTURE_HEIGHT * 0.5;
+		var x = CAPTURE_WIDTH * 0.25;
+		var y = CAPTURE_HEIGHT * 0.25;
+		var data = ctx.getImageData(x, y, w, h).data;
 		var total = 0;
 		var count = 0;
 
@@ -518,23 +544,33 @@
 		var srcY = (videoH - srcH) / 2;
 
 		ctx.clearRect(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-		// Unsupported browsers simply ignore an unrecognized filter value rather than
-		// throwing, so this degrades gracefully on older WebKit builds.
-		ctx.filter = 'contrast(1.1) brightness(1.05) saturate(1.05)';
+
+		// CRITICAL FIREFOX FIX: NEVER use ctx.filter = '...' here!
+		// Firefox has a known engine bug where applying filters while drawing 
+		// a live WebRTC video feed turns the entire canvas completely pitch black!
 		ctx.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-		ctx.filter = 'none';
 	}
 
 	function captureAndSubmit(stream, isFirstTime) {
 		if (isFirstTime) {
+			// CRITICAL FIX: Explicitly clear and reset the video element 
+			// to prevent stale frames from the previous stream.
+			videoEl.pause();
+			videoEl.srcObject = null;
+			videoEl.load(); // Forces the browser to release the old stream
+
 			videoEl.srcObject = stream;
+
+			// Ensure the video is muted and plays inline (required for autoplay policies)
+			videoEl.muted = true;
+			videoEl.playsInline = true;
 		}
 
 		return new Promise(function (resolve) {
 			var takePicture = function () {
 				setStatus(config.i18n.verifying || "Verifying...");
 
-				var ctx = canvasEl.getContext('2d');
+				var ctx = canvasEl.getContext('2d', { willReadFrequently: true });
 				drawNormalizedFrame(ctx);
 
 				var luminance = measureAverageLuminance(ctx);
@@ -568,28 +604,48 @@
 				);
 			};
 
+			var startCountdown = function () {
+				// Double check that the video is actually rendering frames
+				if (videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+					setTimeout(startCountdown, 100); // Wait 100ms and try again
+					return;
+				}
+
+				var countdown = 3;
+				var guidance = [config.i18n.centerFace, config.i18n.moveCloser];
+				var guidanceIndex = 0;
+
+				setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
+
+				var interval = setInterval(function () {
+					countdown--;
+					guidanceIndex = (guidanceIndex + 1) % guidance.length;
+
+					if (countdown > 0) {
+						setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
+					} else {
+						clearInterval(interval);
+						takePicture();
+					}
+				}, 1000);
+			};
+
 			if (isFirstTime) {
-				videoEl.onloadeddata = function () {
-					var countdown = 3;
-					var guidance = [config.i18n.centerFace, config.i18n.moveCloser];
-					var guidanceIndex = 0;
-
-					setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
-
-					var interval = setInterval(function () {
-						countdown--;
-						guidanceIndex = (guidanceIndex + 1) % guidance.length;
-
-						if (countdown > 0) {
-							setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
-						} else {
-							clearInterval(interval);
-							takePicture();
-						}
-					}, 1000);
+				videoEl.onloadedmetadata = function () {
+					// Explicitly play the video to kickstart the WebRTC pipeline
+					var playPromise = videoEl.play();
+					if (playPromise !== undefined) {
+						playPromise.then(startCountdown).catch(function (err) {
+							console.error("Video play failed:", err);
+							// Fallback: try to start countdown anyway if play() is blocked
+							startCountdown();
+						});
+					} else {
+						startCountdown();
+					}
 				};
 			} else {
-				takePicture();
+				startCountdown();
 			}
 		});
 	}

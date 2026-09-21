@@ -175,7 +175,6 @@ class BG_Rest_Controller {
 		}
 
 		if ( ! BG_Enrollment::has_enrollment( $user_id ) ) {
-			self::log( $user_id, 'failure', $request );
 			return new WP_Error( 'bg_not_enrolled', __( 'No biometric profile is on file. Contact your administrator.', 'biometric-gate' ), array( 'status' => 412 ) );
 		}
 
@@ -183,7 +182,6 @@ class BG_Rest_Controller {
 		$frame     = base64_decode( $frame_b64, true );
 
 		if ( false === $frame || '' === $frame ) {
-			self::log( $user_id, 'failure', $request );
 			return new WP_Error( 'bg_bad_frame', __( 'No usable camera frame was received.', 'biometric-gate' ), array( 'status' => 400 ) );
 		}
 
@@ -199,16 +197,14 @@ class BG_Rest_Controller {
 				return new WP_REST_Response( array( 'status' => 'cloud_bypass' ), 200 );
 			}
 
-			self::log( $user_id, 'failure', $request, null );
-			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 401 ) );
+			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 403 ) );
 		}
 
 		if ( ! $result['pass'] ) {
-			self::log( $user_id, 'failure', $request, $result['score'] );
 			return new WP_Error(
 				'bg_no_match',
 				__( 'The live scan did not match the enrolled identity.', 'biometric-gate' ),
-				array( 'status' => 401 )
+				array( 'status' => 403 )
 			);
 		}
 
