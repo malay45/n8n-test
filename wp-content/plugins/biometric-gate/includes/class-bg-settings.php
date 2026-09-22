@@ -37,6 +37,7 @@ class BG_Settings {
 			// The "Close" escape-hatch button's Continue destination (spec: lets a stuck user
 			// leave gracefully without granting access — never a bypass into protected content).
 			'close_button_redirect_url' => '',
+			'close_confirm_message'     => __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' ),
 
 			// Per-violation-type anti-cheat toggles. devtools defaults OFF since window-size-based
 			// detection is a best-effort heuristic (see bg-gate.js) with real false-positive risk.
@@ -182,6 +183,10 @@ class BG_Settings {
 		$clean['close_button_redirect_url'] = isset( $input['close_button_redirect_url'] )
 			? esc_url_raw( wp_unslash( $input['close_button_redirect_url'] ) )
 			: '';
+
+		$clean['close_confirm_message'] = isset( $input['close_confirm_message'] ) && '' !== trim( $input['close_confirm_message'] )
+			? sanitize_textarea_field( wp_unslash( $input['close_confirm_message'] ) )
+			: __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' );
 
 		$clean['kill_switches'] = self::sanitize_kill_switches(
 			isset( $input['kill_switches'] ) && is_array( $input['kill_switches'] ) ? $input['kill_switches'] : array()

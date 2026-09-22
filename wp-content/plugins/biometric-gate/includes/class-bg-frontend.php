@@ -87,7 +87,7 @@ class BG_Frontend {
 					'tooBright'      => __( 'Too much light/glare detected. Please reduce backlighting and try again.', 'biometric-gate' ),
 					'centerFace'     => __( 'Center your profile in the frame.', 'biometric-gate' ),
 					'moveCloser'     => __( 'Move closer to the lens.', 'biometric-gate' ),
-					'closeConfirm'   => __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' ),
+					'closeConfirm'   => $settings['close_confirm_message'],
 					'closeButton'    => __( 'Close', 'biometric-gate' ),
 				),
 			)

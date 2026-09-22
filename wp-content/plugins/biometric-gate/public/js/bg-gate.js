@@ -79,11 +79,8 @@
 	// ---------------------------------------------------------------------
 
 	function buildOverlayScaffold() {
-		overlayEl = document.createElement('div');
+		overlayEl = document.createElement('dialog');
 		overlayEl.id = 'bg-gate-overlay';
-		overlayEl.setAttribute('role', 'dialog');
-		overlayEl.setAttribute('aria-modal', 'true');
-		overlayEl.hidden = true;
 
 		overlayEl.innerHTML =
 			'<button type="button" class="bg-gate-close-btn">' + (config.i18n.closeButton || 'Close') + '</button>' +
@@ -149,7 +146,9 @@
 	}
 
 	function showOverlay() {
-		overlayEl.hidden = false;
+		if (!overlayEl.open) {
+			overlayEl.showModal();
+		}
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -161,7 +160,6 @@
 
 		if (!isBlockingShell) {
 			document.documentElement.classList.add('bg-gate-blur-active');
-			exitNativeFullscreen();
 
 			pausedMedia = [];
 			pauseAllMedia();
@@ -178,7 +176,9 @@
 
 	function hideOverlay() {
 		intentionalHide = true;
-		overlayEl.hidden = true;
+		if (overlayEl.open) {
+			overlayEl.close();
+		}
 		document.documentElement.classList.remove('bg-gate-blur-active');
 
 		if (mediaRescanTimer) {
@@ -187,6 +187,7 @@
 		}
 
 		resumeAllMedia();
+
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
@@ -196,27 +197,7 @@
 		}, 0);
 	}
 
-	/**
-	 * A CSS z-index can never beat a native-fullscreened element's browser-level top layer —
-	 * that's why the scan modal was opening *behind* a fullscreen lesson video. The only fix
-	 * is to force a real exit from fullscreen before showing the overlay.
-	 */
-	function exitNativeFullscreen() {
-		var fsElement = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
-		if (!fsElement) {
-			return;
-		}
 
-		try {
-			if (document.exitFullscreen) {
-				document.exitFullscreen().catch(function () { /* noop */ });
-			} else if (document.webkitExitFullscreen) {
-				document.webkitExitFullscreen();
-			} else if (document.msExitFullscreen) {
-				document.msExitFullscreen();
-			}
-		} catch (e) { /* noop */ }
-	}
 
 	function setStatus(text, isHtml) {
 		if (isHtml) {
@@ -232,14 +213,14 @@
 				return;
 			}
 			var stillPresent = document.body.contains(overlayEl);
-			var stillVisible = stillPresent && 'none' !== window.getComputedStyle(overlayEl).display && !overlayEl.hidden;
+			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
 
-			if (!overlayEl.hidden && (!stillPresent || !stillVisible)) {
+			if (overlayEl.open && (!stillPresent || !stillVisible)) {
 				killSwitch('overlay_tampered');
 			}
 		});
 
-		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
 	}
 
 	/**
@@ -334,7 +315,7 @@
 			stopStream(activeStream);
 			activeStream = null;
 
-			if (overlayEl && !overlayEl.hidden) {
+			if (overlayEl && overlayEl.open) {
 				setStatus('');
 				startBtn.disabled = false;
 				startBtn.hidden = false;
@@ -357,7 +338,14 @@
 				return;
 			}
 			try {
-				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
+				var isPlaying = false;
+				if (el.tagName && el.tagName.toLowerCase().indexOf('presto') !== -1) {
+					// We always want to resume presto players since we can't reliably read their state synchronously
+					isPlaying = true;
+				} else {
+					isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
+				}
+
 				if (isPlaying && -1 === pausedMedia.indexOf(el)) {
 					pausedMedia.push(el);
 				}
@@ -368,6 +356,9 @@
 		});
 		document.querySelectorAll('iframe').forEach(function (frame) {
 			try {
+				if (-1 === pausedMedia.indexOf(frame)) {
+					pausedMedia.push(frame);
+				}
 				frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
 				frame.contentWindow.postMessage(JSON.stringify({ method: 'pause' }), '*');
 				frame.contentWindow.postMessage('{"method":"pause"}', '*');
@@ -381,6 +372,12 @@
 			try {
 				if (typeof el.play === 'function') {
 					el.play();
+				}
+				if (el.tagName && el.tagName.toLowerCase() === 'iframe') {
+					el.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+					el.contentWindow.postMessage(JSON.stringify({ method: 'play' }), '*');
+					el.contentWindow.postMessage('{"method":"play"}', '*');
+					el.contentWindow.postMessage('play', '*');
 				}
 			} catch (e) { /* noop */ }
 		});

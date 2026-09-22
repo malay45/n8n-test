@@ -201,6 +201,7 @@ class BG_Admin_Page {
 				'fail_action'         => isset( $_POST['fail_action'] ) ? wp_unslash( $_POST['fail_action'] ) : 'logout',
 				'fail_redirect_url'   => isset( $_POST['fail_redirect_url'] ) ? wp_unslash( $_POST['fail_redirect_url'] ) : '',
 				'close_button_redirect_url' => ! empty( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : home_url(),
+				'close_confirm_message' => isset( $_POST['close_confirm_message'] ) ? wp_unslash( $_POST['close_confirm_message'] ) : '',
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
 				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
@@ -379,6 +380,13 @@ class BG_Admin_Page {
 					<td>
 						<input type="url" name="close_button_redirect_url" id="close_button_redirect_url" placeholder="https://example.com/dashboard" value="<?php echo esc_attr( $settings['close_button_redirect_url'] ); ?>" class="regular-text" />
 						<p class="description"><?php esc_html_e( 'Where a student lands if they click Close on the scan overlay and confirm they want to leave. This never grants access to protected content — it only lets them exit gracefully.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="close_confirm_message"><?php esc_html_e( 'Close Button Confirmation Message', 'biometric-gate' ); ?></label></th>
+					<td>
+						<textarea name="close_confirm_message" id="close_confirm_message" rows="3" class="large-text"><?php echo esc_textarea( $settings['close_confirm_message'] ); ?></textarea>
+						<p class="description"><?php esc_html_e( 'The message shown in the browser confirmation dialog when a student clicks the Close button on the scan overlay.', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
 			</table>

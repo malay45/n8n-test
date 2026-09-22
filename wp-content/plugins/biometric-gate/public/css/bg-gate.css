@@ -15,6 +15,10 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 }
 
 #bg-gate-overlay {
+	display: none;
+}
+
+#bg-gate-overlay[open] {
 	position: fixed;
 	inset: 0;
 	width: 100vw;
@@ -29,15 +33,23 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 	text-align: center;
 	padding: 24px;
 	box-sizing: border-box;
+	border: none;
+	margin: 0;
+	max-width: none;
+	max-height: none;
 }
 
-#faceio-modal {
+/* #faceio-modal {
 	position: relative;
 	z-index: 99999999;
-}
+} */
 
-#bg-gate-overlay[hidden] {
+/* #bg-gate-overlay[hidden] {
 	display: none;
+} */
+
+#bg-gate-overlay::backdrop {
+	background: transparent;
 }
 
 .bg-gate-card {
@@ -47,13 +59,14 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 
 .bg-gate-close-btn {
 	position: absolute;
-	top: 20px;
-	right: 20px;
+	top: 30px;
+	right: 30px;
 	appearance: none;
 	border: none;
 	border-radius: 999px;
-	background: #d63638;
-	color: #fff;
+	background: #d63638 !important;
+	background-color: #d63638;
+	color: #fff !important;
 	font-size: 0.9rem;
 	font-weight: 600;
 	padding: 8px 18px;
@@ -108,6 +121,7 @@ html.bg-gate-blur-active body>*:not(#bg-gate-overlay) {
 	object-fit: cover;
 	transform: scaleX(-1);
 	/* Mirror, matching how users expect to see themselves. */
+	border-radius: inherit;
 }
 
 .bg-gate-start-btn {
