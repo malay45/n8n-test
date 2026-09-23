@@ -47,6 +47,7 @@ class BG_Settings {
 			// (deny-by-default content guard is), just friction against casual snooping.
 			'block_devtools_shortcuts' => false,
 			'blocked_keys_custom'      => '',
+			'disable_frontend_js'      => false,
 		);
 	}
 
@@ -140,7 +141,7 @@ class BG_Settings {
 			? sanitize_textarea_field( wp_unslash( $input['path_rules'] ) )
 			: '';
 
-		$allowed_retention = array( '30', '90', '180', '365', 'forever' );
+		$allowed_retention = array( '1', '7', '30', '90', '180', '365', 'forever' );
 		$clean['retention'] = ( isset( $input['retention'] ) && in_array( $input['retention'], $allowed_retention, true ) )
 			? $input['retention']
 			: '90';
@@ -196,6 +197,7 @@ class BG_Settings {
 		$clean['blocked_keys_custom'] = isset( $input['blocked_keys_custom'] )
 			? sanitize_text_field( wp_unslash( $input['blocked_keys_custom'] ) )
 			: '';
+		$clean['disable_frontend_js'] = ! empty( $input['disable_frontend_js'] );
 
 		return $clean;
 	}

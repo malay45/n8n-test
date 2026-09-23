@@ -37,13 +37,15 @@ class BG_Frontend {
 			file_exists( $css_path ) ? filemtime( $css_path ) : BG_PLUGIN_VERSION
 		);
 
-		wp_enqueue_script(
-			'bg-gate',
-			BG_PLUGIN_URL . 'public/js/bg-gate.js',
-			array(),
-			file_exists( $js_path ) ? filemtime( $js_path ) : BG_PLUGIN_VERSION,
-			true
-		);
+		if ( empty( BG_Settings::get()['disable_frontend_js'] ) ) {
+			wp_enqueue_script(
+				'bg-gate',
+				BG_PLUGIN_URL . 'public/js/bg-gate.js',
+				array(),
+				file_exists( $js_path ) ? filemtime( $js_path ) : BG_PLUGIN_VERSION,
+				true
+			);
+		}
 
 		$settings = BG_Settings::get();
 

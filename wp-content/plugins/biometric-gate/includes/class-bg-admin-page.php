@@ -205,6 +205,7 @@ class BG_Admin_Page {
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
 				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
+				'disable_frontend_js' => isset( $_POST['disable_frontend_js'] ),
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -232,6 +233,13 @@ class BG_Admin_Page {
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php esc_html_e( 'Disable Frontend JS', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="disable_frontend_js" value="1" <?php checked( ! empty( $settings['disable_frontend_js'] ) ); ?> /> <?php esc_html_e( 'Do not load plugin JavaScript on the frontend', 'biometric-gate' ); ?></label>
+						<p class="description"><?php esc_html_e( 'If checked, the JS that triggers face scans and lockouts will not load on the frontend. Useful for debugging without completely turning the gate off.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><label for="scan_threshold_secs"><?php esc_html_e( 'Scan Frequency Threshold (Seconds)', 'biometric-gate' ); ?></label></th>
 					<td><input type="number" min="1" step="1" name="scan_threshold_secs" id="scan_threshold_secs" value="<?php echo esc_attr( $settings['scan_threshold_secs'] ); ?>" class="small-text" /></td>
 				</tr>
@@ -253,7 +261,7 @@ class BG_Admin_Page {
 					<th scope="row"><label for="retention"><?php esc_html_e( 'Log Retention Purge Limit', 'biometric-gate' ); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach ( array( '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
+							<?php foreach ( array( '1' => '1 Day', '7' => '7 Days', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $settings['retention'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select>
