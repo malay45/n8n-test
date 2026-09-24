@@ -37,15 +37,13 @@ class BG_Frontend {
 			file_exists( $css_path ) ? filemtime( $css_path ) : BG_PLUGIN_VERSION
 		);
 
-		if ( empty( BG_Settings::get()['disable_frontend_js'] ) ) {
-			wp_enqueue_script(
-				'bg-gate',
-				BG_PLUGIN_URL . 'public/js/bg-gate.js',
-				array(),
-				file_exists( $js_path ) ? filemtime( $js_path ) : BG_PLUGIN_VERSION,
-				true
-			);
-		}
+		wp_enqueue_script(
+			'bg-gate',
+			BG_PLUGIN_URL . 'public/js/bg-gate.js',
+			array(),
+			file_exists( $js_path ) ? filemtime( $js_path ) : BG_PLUGIN_VERSION,
+			true
+		);
 
 		$settings = BG_Settings::get();
 
@@ -76,6 +74,8 @@ class BG_Frontend {
 
 				'blockDevtoolsShortcuts' => (bool) $settings['block_devtools_shortcuts'],
 				'blockedKeysCustom'      => wp_parse_list( $settings['blocked_keys_custom'] ),
+				'forceNativeIos'         => ! empty( $settings['force_native_ios'] ),
+				'bypassFaceScan'         => ! empty( $settings['bypass_face_scan'] ),
 				'closeButtonRedirectUrl' => esc_url_raw( $settings['close_button_redirect_url'] ),
 
 				'i18n'             => array(

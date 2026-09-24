@@ -208,7 +208,8 @@ class BG_Admin_Page {
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
 				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
-				'disable_frontend_js' => isset( $_POST['disable_frontend_js'] ),
+				'force_native_ios' => isset( $_POST['force_native_ios'] ),
+				'bypass_face_scan' => isset( $_POST['bypass_face_scan'] ),
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -236,10 +237,17 @@ class BG_Admin_Page {
 					</td>
 				</tr>
 				<tr>
-					<th scope="row"><?php esc_html_e( 'Disable Frontend JS', 'biometric-gate' ); ?></th>
+					<th scope="row"><?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></th>
 					<td>
-						<label><input type="checkbox" name="disable_frontend_js" value="1" <?php checked( ! empty( $settings['disable_frontend_js'] ) ); ?> /> <?php esc_html_e( 'Do not load plugin JavaScript on the frontend', 'biometric-gate' ); ?></label>
-						<p class="description"><?php esc_html_e( 'If checked, the JS that triggers face scans and lockouts will not load on the frontend. Useful for debugging without completely turning the gate off.', 'biometric-gate' ); ?></p>
+						<label><input type="checkbox" name="force_native_ios" value="1" <?php checked( ! empty( $settings['force_native_ios'] ) ); ?> /> <?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></label>
+						<p class="description"><?php esc_html_e( 'When checked, forces videos into the native iOS player when viewed in full-screen on iPhones ONLY to hide the browser URL bar. Does not affect iPads or other devices, and keeps all biometric security fully active.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Bypass Face Scan Overlay (Keep Background Logs Active)', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="bypass_face_scan" value="1" <?php checked( ! empty( $settings['bypass_face_scan'] ) ); ?> /> <?php esc_html_e( 'Bypass Face Scan Overlay (Keep Background Logs Active)', 'biometric-gate' ); ?></label>
+						<p class="description"><?php esc_html_e( 'Emergency override: Suppresses the visual camera popup and blur shield for student troubleshooting. All background security engines, dynamic threshold timer logs, and background tracking matrices remain fully operational.', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
 				<tr>

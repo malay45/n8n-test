@@ -145,6 +145,22 @@ class BG_Rest_Controller {
 			);
 		}
 
+		$settings = BG_Settings::get();
+		if ( ! empty( $settings['bypass_face_scan'] ) ) {
+			BG_Session::mark_verified( $user_id );
+			$page_title = (string) $request->get_param( 'page_title' );
+			$page_url   = (string) $request->get_param( 'page_url' );
+			BG_Logs::insert( $user_id, 'BYPASS', $page_title, $page_url, 100.0 );
+
+			return new WP_REST_Response(
+				array(
+					'bypass'               => true,
+					'seconds_until_rescan' => self::seconds_until_rescan( $user_id ),
+				),
+				200
+			);
+		}
+
 		$ticket = BG_Crypto::random_token( 32 );
 		set_transient( self::TICKET_TRANSIENT_PREFIX . $user_id, $ticket, self::TICKET_TTL_SECONDS );
 

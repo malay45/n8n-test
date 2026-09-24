@@ -66,6 +66,7 @@
 		observeTampering();
 		setupInputBlocking();
 		startDevtoolsWatch();
+		setupIphoneVideoOverride();
 		document.addEventListener('visibilitychange', onVisibilityChange);
 		window.setInterval(function () {
 			if (reconnectPollTimer) return;
@@ -95,6 +96,28 @@
 
 	function killSwitchEnabled(type) {
 		return !!(config.killSwitchesEnabled && config.killSwitchesEnabled[type]);
+	}
+
+	function setupIphoneVideoOverride() {
+		if (!config.forceNativeIos) return;
+		var isIphone = /iPhone/i.test(navigator.userAgent) && !/iPad/i.test(navigator.userAgent);
+		if (!isIphone) return;
+
+		var reqFs = Element.prototype.requestFullscreen || Element.prototype.webkitRequestFullscreen || Element.prototype.mozRequestFullScreen || Element.prototype.msRequestFullscreen;
+
+		if (reqFs) {
+			var overrideFn = function () {
+				var video = (this.tagName && this.tagName.toLowerCase() === 'video') ? this : this.querySelector('video');
+				if (video && typeof video.webkitEnterFullscreen === 'function') {
+					return video.webkitEnterFullscreen();
+				}
+				return reqFs.apply(this, arguments);
+			};
+			Element.prototype.requestFullscreen = overrideFn;
+			if (Element.prototype.webkitRequestFullscreen) Element.prototype.webkitRequestFullscreen = overrideFn;
+			if (Element.prototype.mozRequestFullScreen) Element.prototype.mozRequestFullScreen = overrideFn;
+			if (Element.prototype.msRequestFullscreen) Element.prototype.msRequestFullscreen = overrideFn;
+		}
 	}
 
 	// ---------------------------------------------------------------------

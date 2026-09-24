@@ -48,7 +48,8 @@ class BG_Settings {
 			// (deny-by-default content guard is), just friction against casual snooping.
 			'block_devtools_shortcuts' => false,
 			'blocked_keys_custom'      => '',
-			'disable_frontend_js'      => false,
+			'force_native_ios'         => false,
+			'bypass_face_scan'         => false,
 		);
 	}
 
@@ -202,7 +203,8 @@ class BG_Settings {
 		$clean['blocked_keys_custom'] = isset( $input['blocked_keys_custom'] )
 			? sanitize_text_field( wp_unslash( $input['blocked_keys_custom'] ) )
 			: '';
-		$clean['disable_frontend_js'] = ! empty( $input['disable_frontend_js'] );
+		$clean['force_native_ios'] = ! empty( $input['force_native_ios'] );
+		$clean['bypass_face_scan'] = ! empty( $input['bypass_face_scan'] );
 
 		return $clean;
 	}

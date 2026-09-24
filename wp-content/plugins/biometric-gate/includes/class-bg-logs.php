@@ -15,7 +15,7 @@ defined('ABSPATH') || exit;
 class BG_Logs
 {
 
-	const VALID_STATUSES     = array('success', 'failure', 'timeout', 'cloud_bypass', 'tampered');
+	const VALID_STATUSES     = array('success', 'failure', 'timeout', 'cloud_bypass', 'tampered','BYPASS');
 	const BATCH_SIZE         = 1000;
 	const PROGRESS_TRANSIENT = 'bg_export_progress';
 
