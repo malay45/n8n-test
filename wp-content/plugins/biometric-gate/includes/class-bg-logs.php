@@ -15,7 +15,7 @@ defined('ABSPATH') || exit;
 class BG_Logs
 {
 
-	const VALID_STATUSES     = array('success', 'failure', 'timeout', 'cloud_bypass');
+	const VALID_STATUSES     = array('success', 'failure', 'timeout', 'cloud_bypass', 'tampered');
 	const BATCH_SIZE         = 1000;
 	const PROGRESS_TRANSIENT = 'bg_export_progress';
 
@@ -207,8 +207,8 @@ class BG_Logs
 						$row['created_at'],
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
-						$row['scan_status'],
-						null === $row['confidence_score'] ? '' : $row['confidence_score'],
+						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
+						'tampered' === $row['scan_status'] ? '0.0% Match (Tampered)' : (null === $row['confidence_score'] ? '' : $row['confidence_score']),
 						$row['page_title'],
 						$row['page_url'],
 					)
@@ -383,8 +383,8 @@ class BG_Logs
 						$row['created_at'],
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
-						$row['scan_status'],
-						null === $row['confidence_score'] ? '' : $row['confidence_score'],
+						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
+						'tampered' === $row['scan_status'] ? '0.0% Match (Tampered)' : (null === $row['confidence_score'] ? '' : $row['confidence_score']),
 						$row['page_title'],
 						$row['page_url'],
 					)

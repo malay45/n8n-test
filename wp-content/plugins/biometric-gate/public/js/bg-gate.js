@@ -44,7 +44,7 @@
 	var activeStream = null;
 
 	var MAX_RETRIES = 3;
-	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
+	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe|usb video|software stream/i;
 
 	// Final submitted-frame size, portrait-oriented to match the oval guide mask. Bumped up
 	// from an earlier 320x240: low capture resolution was a real contributor to match
@@ -67,6 +67,29 @@
 		setupInputBlocking();
 		startDevtoolsWatch();
 		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.setInterval(function () {
+			if (reconnectPollTimer) return;
+
+			if (!navigator.onLine) {
+				showConnectionLost();
+				return;
+			}
+
+			fetch(config.restUrl + '/session/status', {
+				method: 'GET',
+				headers: { 'X-WP-Nonce': config.nonce },
+				cache: 'no-cache'
+			})
+				.then(function (res) {
+					// Only treat actual network drops as a disconnect, not 403/401 errors.
+					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
+						throw new Error('Network down');
+					}
+				})
+				.catch(function () {
+					if (!reconnectPollTimer) showConnectionLost();
+				});
+		}, 5000);
 		runScanCycle();
 	}
 
@@ -438,10 +461,45 @@
 			captureAndSubmit(activeStream, false);
 		} else {
 			setStatus(config.i18n.verifying || "Starting camera...");
-			navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
+			getValidCameraStream()
 				.then(auditDevicesThenCapture)
 				.catch(handleCameraError);
 		}
+	}
+
+	function getValidCameraStream() {
+		// 1. Get initial generic stream to prompt permissions and unmask device labels in the browser.
+		return navigator.mediaDevices.getUserMedia({ video: true })
+			.then(function (initialStream) {
+				// 2. Enumerate all devices now that labels are fully visible.
+				return navigator.mediaDevices.enumerateDevices().then(function (devices) {
+					var videoDevices = devices.filter(function (d) { return d.kind === 'videoinput'; });
+					var validDevice = null;
+
+					for (var i = 0; i < videoDevices.length; i++) {
+						var label = (videoDevices[i].label || '').trim().toLowerCase();
+						if (label && !VIRTUAL_CAMERA_PATTERN.test(label)) {
+							validDevice = videoDevices[i];
+							break;
+						}
+					}
+
+					// 3. Stop the initial generic stream so we can request the specific one with ideal constraints.
+					stopStream(initialStream);
+
+					var constraints = buildVideoConstraints();
+
+					// 4. Force target the first physical hardware camera found.
+					if (validDevice) {
+						constraints.deviceId = { exact: validDevice.deviceId };
+						try {
+							window.localStorage.setItem('bg_preferred_camera_id', validDevice.deviceId);
+						} catch (e) { /* noop */ }
+					}
+
+					return navigator.mediaDevices.getUserMedia({ video: constraints });
+				});
+			});
 	}
 
 	function buildVideoConstraints() {
@@ -648,18 +706,16 @@
 	}
 
 	function handleCameraError(err) {
-		var name = err && err.name ? err.name : '';
+		// As requested: if a student's webcam is missing or disabled in their browser, 
+		// automatically stop the scan from firing and neatly display the custom text block 
+		// instead of giving them a failure strike.
+		setStatus(config.noCameraMessage || config.i18n.noCamera, true);
+		startBtn.disabled = false;
 
-		if ('NotFoundError' === name || 'OverconstrainedError' === name) {
-			setStatus(config.noCameraMessage || config.i18n.noCamera, true);
-			startBtn.disabled = false;
-			return;
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
 		}
-
-		// Permission denied, or any other getUserMedia failure — counts as a failed attempt,
-		// same as a failed face match, so a student can't dodge verification by repeatedly
-		// declining the camera prompt.
-		handleScanError({ code: 'bg_camera_denied', message: config.i18n.scanFailed });
 	}
 
 	function stopStream(stream) {
@@ -669,6 +725,11 @@
 	}
 
 	function handleScanSuccess(res) {
+		if (res && res.status === 'redirected') {
+			window.location.href = res.redirect_url || '/';
+			return;
+		}
+
 		retryCount = 0;
 		hideOverlay();
 
@@ -732,6 +793,10 @@
 	function showConnectionLost() {
 		showOverlay();
 		startBtn.hidden = true;
+
+		var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+		if (videoFrame) videoFrame.style.display = 'none';
+
 		setStatus(config.i18n.connectionLost);
 
 		if (!reconnectPollTimer) {
@@ -750,6 +815,10 @@
 			reconnectPollTimer = null;
 		}
 		startBtn.hidden = false;
+
+		var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+		if (videoFrame) videoFrame.style.display = '';
+
 		runScanCycle();
 	}
 
@@ -774,7 +843,7 @@
 			window.location.href = redirectUrl || '/';
 		};
 
-		apiPost('/session/killswitch', { reason: reason })
+		apiPost('/session/killswitch', { reason: reason, page_url: config.pageUrl })
 			.then(function (res) {
 				navigateAway(res && res.redirect_url);
 			})

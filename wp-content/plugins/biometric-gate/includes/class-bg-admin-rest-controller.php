@@ -137,6 +137,7 @@ class BG_Admin_Rest_Controller {
 				'has_enrollment' => BG_Enrollment::has_enrollment( $user->ID ),
 				'bypass'         => BG_Session::is_bypassed( $user->ID ),
 				'locked'         => BG_Session::is_locked( $user->ID ),
+				'strikes'        => (int) get_user_meta( $user->ID, 'biometric_strikes', true ),
 			);
 		}
 

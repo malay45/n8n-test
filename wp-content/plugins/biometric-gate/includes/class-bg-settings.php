@@ -33,6 +33,7 @@ class BG_Settings {
 			// below — this is specifically "ran out of retries on a genuine non-match").
 			'fail_action'         => 'logout', // 'logout' | 'redirect'
 			'fail_redirect_url'   => '',
+			'tampered_redirect_url' => home_url(),
 
 			// The "Close" escape-hatch button's Continue destination (spec: lets a stuck user
 			// leave gracefully without granting access — never a bypass into protected content).
@@ -180,6 +181,10 @@ class BG_Settings {
 		$clean['fail_redirect_url'] = isset( $input['fail_redirect_url'] )
 			? esc_url_raw( wp_unslash( $input['fail_redirect_url'] ) )
 			: '';
+
+		$clean['tampered_redirect_url'] = ! empty( $input['tampered_redirect_url'] )
+			? esc_url_raw( wp_unslash( $input['tampered_redirect_url'] ) )
+			: home_url();
 
 		$clean['close_button_redirect_url'] = isset( $input['close_button_redirect_url'] )
 			? esc_url_raw( wp_unslash( $input['close_button_redirect_url'] ) )

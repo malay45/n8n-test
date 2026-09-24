@@ -140,9 +140,8 @@ class BG_Enrollment {
 
 		$path = BG_Crypto::decrypt( $encrypted_path );
 		if ( null === $path ) {
-			// Tampering detected — fail closed and lock the profile (spec #2).
-			BG_Session::lock_account( $user_id );
-			return null;
+			// Tampering detected — fail closed and return WP_Error for the controller to handle.
+			return new WP_Error('bg_tampered_reference', 'Database String Integrity Failure');
 		}
 
 		if ( ! file_exists( $path ) ) {

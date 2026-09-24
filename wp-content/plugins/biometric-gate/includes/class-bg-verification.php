@@ -53,6 +53,10 @@ class BG_Verification {
 	 */
 	public static function verify_against_reference( $user_id, $live_frame_binary ) {
 		$reference_b64 = BG_Enrollment::get_reference_portrait( $user_id );
+        
+        if ( is_wp_error( $reference_b64 ) ) {
+            return $reference_b64;
+        }
 
 		if ( null === $reference_b64 ) {
 			return new WP_Error( 'bg_no_reference', __( 'No biometric reference is on file for this account.', 'biometric-gate' ) );

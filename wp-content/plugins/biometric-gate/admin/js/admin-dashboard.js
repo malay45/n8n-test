@@ -75,22 +75,27 @@
 	 * (see BG_Verification::verify_against_reference()), so this only needs to color by the
 	 * status that's already been decided server-side — never re-derive pass/fail here.
 	 */
-	function buildStatusBadge(status, confidenceScore) {
+	function buildStatusBadge(status, confidenceScore, pageTitle) {
 		var labels = {
 			success: "Success",
 			failure: "Failure",
 			cloud_bypass: "Cloud Bypass",
 			timeout: "Timeout",
+			tampered: "CRITICAL: Database String Integrity Failure",
 		};
 		var colors = {
 			success: "#00a32a",
 			failure: "#d63638",
 			cloud_bypass: "#dba617",
 			timeout: "#787c82",
+			tampered: "#000000",
 		};
 
 		var label = labels[status] || status;
-		if (confidenceScore !== null && confidenceScore !== undefined && confidenceScore !== "") {
+		if (status === "tampered") {
+			label = (pageTitle && pageTitle.indexOf('CRITICAL:') !== -1) ? pageTitle : labels.tampered;
+			label += " (0.0% Match (Tampered / Failed Check))";
+		} else if (confidenceScore !== null && confidenceScore !== undefined && confidenceScore !== "") {
 			label += " (" + parseFloat(confidenceScore).toFixed(1) + "% Match)";
 		}
 
@@ -119,7 +124,7 @@
 		root.innerHTML =
 			'<div class="bg-admin-toolbar"><input type="search" id="bg-user-search" placeholder="Search by name or email…" class="regular-text"></div>' +
 			'<table class="widefat striped"><thead><tr>' +
-			"<th>Name</th><th>Email</th><th>Status</th><th>Upload ID Photo</th><th>Enabled</th><th>Actions</th>" +
+			"<th>Name</th><th>Email</th><th>Status</th><th>Security Violations</th><th>Upload ID Photo</th><th>Enabled</th><th>Actions</th>" +
 			'</tr></thead><tbody id="bg-user-rows"></tbody></table>';
 
 		document.getElementById("bg-user-search").addEventListener(
@@ -162,6 +167,8 @@
 						: cfg.i18n.idMissing,
 			);
 			tr.appendChild(statusTd);
+
+			tr.appendChild(td(u.strikes || 0));
 
 			var uploadTd = document.createElement("td");
 			var typeSelect = document.createElement("select");
@@ -417,10 +424,14 @@
 			tr.appendChild(nameTd);
 
 			var statusTd = document.createElement("td");
-			statusTd.appendChild(buildStatusBadge(row.scan_status, row.confidence_score));
+			statusTd.appendChild(buildStatusBadge(row.scan_status, row.confidence_score, row.page_title));
 			tr.appendChild(statusTd);
 
-			tr.appendChild(td(row.page_title || row.page_url));
+			if (row.scan_status === "tampered") {
+				tr.appendChild(td(row.page_url));
+			} else {
+				tr.appendChild(td(row.page_title || row.page_url));
+			}
 
 			tbody.appendChild(tr);
 		});
