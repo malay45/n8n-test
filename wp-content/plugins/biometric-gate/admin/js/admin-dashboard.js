@@ -374,6 +374,9 @@
 		var clearBtn = document.getElementById("bg-log-clear-filter");
 		if (clearBtn) {
 			clearBtn.addEventListener("click", function () {
+				if (!window.confirm(cfg.i18n.confirmClearFilter || "Clear the user filter and return to the full audit log?")) {
+					return;
+				}
 				window.location.href = cfg.logsTabUrl;
 			});
 		}
