@@ -136,6 +136,7 @@ class BG_Admin_Page {
 					'i18n'            => array(
 						'confirmReset'      => __( 'Reset this student\'s biometric enrollment? They will need to be re-enrolled before they can access protected pages again.', 'biometric-gate' ),
 						'confirmExportWipe' => __( 'This will export every log row to a CSV backup, then permanently erase the live log table. Continue?', 'biometric-gate' ),
+						'confirmClearFilter' => __( 'Clear the user filter and return to the full audit log?', 'biometric-gate' ),
 						'confirmDeleteFile' => __( 'Permanently delete this backup file from the server?', 'biometric-gate' ),
 						'idTokenLoaded'     => __( 'ID Token Loaded', 'biometric-gate' ),
 						'idMissing'         => __( 'ID Missing', 'biometric-gate' ),
@@ -218,6 +219,13 @@ class BG_Admin_Page {
 				$notice = '<div class="notice notice-error"><p>' . esc_html( $clean->get_error_message() ) . '</p></div>';
 			} else {
 				update_option( BG_Settings::OPTION_KEY, $clean );
+
+				// Nudge WP-Cron to check immediately rather than waiting for its own next
+				// scheduled pass — most useful right after switching to one of the fast-testing
+				// retention windows (15 Minutes/1 Hour), so the very next prune isn't a coin
+				// flip on when WP-Cron would otherwise have gotten around to it.
+				spawn_cron();
+
 				$notice = '<div class="notice notice-success"><p>' . esc_html__( 'Settings saved.', 'biometric-gate' ) . '</p></div>';
 			}
 		}
@@ -240,7 +248,7 @@ class BG_Admin_Page {
 					<th scope="row"><?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></th>
 					<td>
 						<label><input type="checkbox" name="force_native_ios" value="1" <?php checked( ! empty( $settings['force_native_ios'] ) ); ?> /> <?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></label>
-						<p class="description"><?php esc_html_e( 'When checked, forces videos into the native iOS player when viewed in full-screen on iPhones ONLY to hide the browser URL bar. Does not affect iPads or other devices, and keeps all biometric security fully active.', 'biometric-gate' ); ?></p>
+						<p class="description"><?php esc_html_e( 'When checked, forces videos into the native iOS player when viewed in full-screen on iPhones ONLY to hide the browser URL bar. Does not affect iPads or other devices. The scan overlay now auto-exits and restores native iOS video fullscreen so a due scan is never hidden behind it — this covers self-hosted/CDN videos; a YouTube/Vimeo iframe embed still pauses on schedule, but its own native fullscreen player chrome is a different origin the browser does not let this plugin (or any page) see or control.', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
 				<tr>
@@ -272,7 +280,7 @@ class BG_Admin_Page {
 					<th scope="row"><label for="retention"><?php esc_html_e( 'Log Retention Purge Limit', 'biometric-gate' ); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach ( array( '1' => '1 Day', '7' => '7 Days', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
+							<?php foreach ( array( '15m' => '15 Minutes (testing)', '1h' => '1 Hour (testing)', '1' => '1 Day', '7' => '7 Days', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $settings['retention'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select>

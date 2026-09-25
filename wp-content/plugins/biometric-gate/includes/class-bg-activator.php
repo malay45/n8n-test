@@ -20,7 +20,7 @@ class BG_Activator {
 		}
 
 		if ( ! wp_next_scheduled( 'bg_recurring_retention_prune' ) ) {
-			wp_schedule_event( time(), 'daily', 'bg_recurring_retention_prune' );
+			wp_schedule_event( time(), 'bg_fifteen_minutes', 'bg_recurring_retention_prune' );
 		}
 	}
 
@@ -43,6 +43,17 @@ class BG_Activator {
 			'interval' => 90 * DAY_IN_SECONDS,
 			'display'  => __( 'Every 90 Days', 'biometric-gate' ),
 		);
+
+		// Retention pruning used to run 'daily', which made the 15-Minutes/1-Hour fast-testing
+		// retention options (client QA item 9) meaningless — a value that "expires" sooner than
+		// the cron even checks would just sit there until the next daily run. Checking every 15
+		// minutes instead is still cheap the rest of the time: run_retention_prune() does a
+		// single COUNT(*) and bails immediately whenever nothing is actually due.
+		$schedules['bg_fifteen_minutes'] = array(
+			'interval' => 15 * MINUTE_IN_SECONDS,
+			'display'  => __( 'Every 15 Minutes', 'biometric-gate' ),
+		);
+
 		return $schedules;
 	}
 
@@ -78,11 +89,14 @@ class BG_Activator {
 	}
 
 	const DB_VERSION_OPTION = 'bg_db_version';
-	const DB_VERSION        = 2; // Bumped when confidence_score was added to the schema.
+	const DB_VERSION        = 3; // v2: confidence_score column. v3: retention-prune cron interval.
 
 	/**
 	 * dbDelta() only runs on activation; an in-place plugin update (no deactivate/reactivate)
-	 * otherwise never re-creates the table to pick up new columns. Hooked from admin_init.
+	 * otherwise never re-creates the table to pick up new columns, and a site already activated
+	 * before this version keeps whatever cron interval wp_schedule_event() locked in at the
+	 * time — it never silently adopts a newly-registered one. Hooked from admin_init so both
+	 * kinds of upgrade apply without requiring a deactivate/reactivate cycle.
 	 */
 	public static function maybe_upgrade() {
 		if ( (int) get_option( self::DB_VERSION_OPTION, 0 ) >= self::DB_VERSION ) {
@@ -90,6 +104,15 @@ class BG_Activator {
 		}
 
 		self::create_table();
+
+		// Move any already-scheduled retention prune off the old 'daily' interval (or any
+		// other stale interval) onto the finer one registered in register_cron_schedules().
+		$next_run = wp_next_scheduled( 'bg_recurring_retention_prune' );
+		if ( $next_run ) {
+			wp_unschedule_event( $next_run, 'bg_recurring_retention_prune' );
+		}
+		wp_schedule_event( time(), 'bg_fifteen_minutes', 'bg_recurring_retention_prune' );
+
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION );
 	}
 

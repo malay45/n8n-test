@@ -183,21 +183,64 @@ class BG_Admin_Rest_Controller {
 		$user_id      = absint( $request->get_param( 'user_id' ) );
 		$progress_key = $user_id > 0 ? ( 'bg_export_progress_wipe_user_' . $user_id ) : BG_Logs::PROGRESS_TRANSIENT;
 
-		// Scheduled off-request (not run inline here) so a large table's export/delete can
-		// never hit a PHP-FPM timeout or memory ceiling on the HTTP request that clicked the
-		// button (spec #9) — the admin dashboard polls export-progress for status instead.
-		wp_schedule_single_event( time(), 'bg_job_export_and_wipe', array( $user_id, $progress_key ) );
-
-		return new WP_REST_Response( array( 'status' => 'scheduled', 'progress_key' => $progress_key ), 202 );
+		return self::respond_then_run(
+			array( 'status' => 'scheduled', 'progress_key' => $progress_key ),
+			function () use ( $user_id, $progress_key ) {
+				BG_Logs::run_export_and_wipe( $user_id, $progress_key );
+			}
+		);
 	}
 
 	public static function export_user( WP_REST_Request $request ) {
 		$user_id      = absint( $request->get_param( 'user_id' ) );
 		$progress_key = 'bg_export_progress_user_' . $user_id;
 
-		wp_schedule_single_event( time(), 'bg_job_export_user', array( $user_id, $progress_key ) );
+		return self::respond_then_run(
+			array( 'status' => 'scheduled', 'progress_key' => $progress_key ),
+			function () use ( $user_id, $progress_key ) {
+				BG_Logs::run_export_user( $user_id, $progress_key );
+			}
+		);
+	}
 
-		return new WP_REST_Response( array( 'status' => 'scheduled', 'progress_key' => $progress_key ), 202 );
+	/**
+	 * Runs a job "in the background" from the clicking admin's point of view without depending
+	 * on WP-Cron at all: wp_schedule_single_event() only actually executes once something
+	 * triggers WP-Cron's self-loopback HTTP request to wp-cron.php, and on this staging site
+	 * that loopback sits behind an HTTP Basic-Auth gateway — the request never authenticates,
+	 * the scheduled job never runs, and the export/wipe buttons stick at "Exporting…" forever
+	 * (exactly what the client's QA pass reported for both the per-student and site-wide export
+	 * buttons). This sends the REST response immediately, detaches from the HTTP connection via
+	 * fastcgi_finish_request() (available on Cloudways' PHP-FPM stack), then keeps running $job()
+	 * in the same already-authenticated PHP process — no second request, nothing to block.
+	 *
+	 * Falls back to running $job() inline (holding the connection open until it finishes) when
+	 * fastcgi_finish_request() isn't available; still correct, just not instant on a huge table.
+	 * Either way this never depends on WP-Cron for these two admin-initiated, "someone is
+	 * actively watching a progress bar" actions.
+	 *
+	 * @param array    $response_body
+	 * @param callable $job
+	 * @return WP_REST_Response|null Only returns a response on the fallback path — on the
+	 *                                fastcgi_finish_request() path the response was already
+	 *                                sent manually and the request ends via exit.
+	 */
+	private static function respond_then_run( array $response_body, callable $job ) {
+		if ( function_exists( 'fastcgi_finish_request' ) && ! headers_sent() ) {
+			ignore_user_abort( true );
+			status_header( 202 );
+			header( 'Content-Type: application/json; charset=utf-8' );
+			echo wp_json_encode( $response_body );
+			fastcgi_finish_request();
+
+			$job();
+			exit;
+		}
+
+		ignore_user_abort( true );
+		$job();
+
+		return new WP_REST_Response( $response_body, 202 );
 	}
 
 	public static function export_progress( WP_REST_Request $request ) {

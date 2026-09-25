@@ -307,8 +307,11 @@ class BG_Logs
 	}
 
 	/**
-	 * Daily: back up and delete only the rows older than the admin's configured retention
-	 * window (spec #6's "Pruning & Backup Architecture"). "Keep Forever" disables this entirely.
+	 * Runs on BG_Activator's retention-prune cron schedule and backs up + deletes only the rows
+	 * older than the admin's configured retention window (spec #6's "Pruning & Backup
+	 * Architecture"). "Keep Forever" disables this entirely. '15m'/'1h' are the two fast-testing
+	 * options (client QA item 9) — see BG_Activator::register_cron_schedules() for why the cron
+	 * itself needed a finer interval than 'daily' for those to be observable at all.
 	 */
 	public static function run_retention_prune()
 	{
@@ -318,14 +321,24 @@ class BG_Logs
 			return;
 		}
 
-		$days = absint($retention);
-		if ($days < 1) {
-			return;
+		$sub_day_units = array(
+			'15m' => 15 * MINUTE_IN_SECONDS,
+			'1h'  => HOUR_IN_SECONDS,
+		);
+
+		if ( isset( $sub_day_units[ $retention ] ) ) {
+			$window_seconds = $sub_day_units[ $retention ];
+		} else {
+			$days = absint($retention);
+			if ($days < 1) {
+				return;
+			}
+			$window_seconds = $days * DAY_IN_SECONDS;
 		}
 
 		global $wpdb;
 		$table  = BG_Activator::table_name();
-		$cutoff = gmdate('Y-m-d H:i:s', time() - ($days * DAY_IN_SECONDS));
+		$cutoff = gmdate('Y-m-d H:i:s', time() - $window_seconds);
 
 		$has_old_rows = (int) $wpdb->get_var(
 			$wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared

@@ -43,6 +43,8 @@
 	var pausedMedia = [];
 	var activeStream = null;
 	var lastFullscreenElement = null;
+	var iosFullscreenVideoEl = null;
+	var lastIosFullscreenVideo = null;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe|usb video|software stream/i;
@@ -76,7 +78,8 @@
 		setupInputBlocking();
 		startDevtoolsWatch();
 		setupIphoneVideoOverride();
-		
+		watchIosNativeVideoFullscreen();
+
 		document.addEventListener('visibilitychange', onVisibilityChange);
 		window.addEventListener('blur', onWindowBlur);
 		window.addEventListener('focus', onWindowFocus);
@@ -143,6 +146,40 @@
 			if (Element.prototype.mozRequestFullScreen) Element.prototype.mozRequestFullScreen = overrideFn;
 			if (Element.prototype.msRequestFullscreen) Element.prototype.msRequestFullscreen = overrideFn;
 		}
+	}
+
+	/**
+	 * iOS Safari's native <video> fullscreen (webkitEnterFullscreen — used both for a same-
+	 * origin <video>'s own controls AND whenever setupIphoneVideoOverride() above redirects
+	 * requestFullscreen() to it) renders as a system-level player OUTSIDE the page's normal DOM
+	 * stacking context. document.fullscreenElement stays null throughout, so the standard
+	 * exit/restore branch in showOverlay()/hideOverlay() below never sees it, and no z-index can
+	 * put our <dialog> overlay above it — this is what item 5.4 in the client's QA pass hit
+	 * ("Face Scan does not pop up... in full-screen mode on a mobile phone").
+	 *
+	 * webkitbeginfullscreen/webkitendfullscreen fire on the <video> element itself (not
+	 * document), don't bubble in every WebKit version, and only exist for same-origin video —
+	 * a YouTube/Vimeo iframe's internal <video> is on a different origin and cross-origin-
+	 * inaccessible to this script by design (no page can observe or control another origin's
+	 * fullscreen state; postMessage's pauseVideo command is the only lever we have there, and
+	 * it already fires from pauseAllMedia()). This fully solves the case these events *can*
+	 * reach: any self-hosted/CDN <video> on our own page.
+	 */
+	function watchIosNativeVideoFullscreen() {
+		document.addEventListener('webkitbeginfullscreen', function (e) {
+			if (e.target && 'VIDEO' === e.target.tagName) {
+				iosFullscreenVideoEl = e.target;
+			}
+		}, true);
+
+		document.addEventListener('webkitendfullscreen', function (e) {
+			if (iosFullscreenVideoEl === e.target) {
+				iosFullscreenVideoEl = null;
+			}
+			if (lastIosFullscreenVideo === e.target) {
+				lastIosFullscreenVideo = null;
+			}
+		}, true);
 	}
 
 	// ---------------------------------------------------------------------
@@ -227,6 +264,17 @@
 			} catch (e) { /* ignore */ }
 		}
 
+		// iOS native <video> fullscreen (see watchIosNativeVideoFullscreen) never surfaces via
+		// document.fullscreenElement above, so it needs its own exit/restore pair — without
+		// this, the dialog below would open underneath the still-fullscreen native video player
+		// and never actually be seen (item 5.4).
+		if (iosFullscreenVideoEl) {
+			lastIosFullscreenVideo = iosFullscreenVideoEl;
+			try {
+				lastIosFullscreenVideo.webkitExitFullscreen();
+			} catch (e) { /* ignore */ }
+		}
+
 		if (!overlayEl.open) {
 			overlayEl.showModal();
 		}
@@ -277,6 +325,13 @@
 				else if (lastFullscreenElement.msRequestFullscreen) lastFullscreenElement.msRequestFullscreen();
 			} catch(e) { /* ignore */ }
 			lastFullscreenElement = null;
+		}
+
+		if (lastIosFullscreenVideo) {
+			try {
+				lastIosFullscreenVideo.webkitEnterFullscreen();
+			} catch (e) { /* ignore */ }
+			lastIosFullscreenVideo = null;
 		}
 
 		if (activeStream) {
@@ -355,12 +410,24 @@
 			e.preventDefault();
 		});
 
+		// Windows/Linux DevTools shortcuts use Shift as the modifier; macOS uses Option (Alt)
+		// for the same actions in Chrome/Firefox (Cmd+Option+I, not Cmd+Shift+I) — the previous
+		// matcher only ever checked ctrl/shift and had no alt handling at all, so every Mac
+		// combo in the client's table silently failed to match. Each row below is listed once
+		// per platform so both fire correctly.
 		var blockedCombos = [
-			{ key: 'F12' },
-			{ key: 'I', ctrl: true, shift: true },
-			{ key: 'J', ctrl: true, shift: true },
-			{ key: 'C', ctrl: true, shift: true },
-			{ key: 'U', ctrl: true },
+			{ key: 'F12' }, // Chrome/Edge DevTools (Win/Linux/Mac all use bare F12).
+			{ key: 'I', ctrl: true, shift: true }, // Open Elements Inspector (Win/Linux).
+			{ key: 'I', ctrl: true, alt: true }, // Open Elements Inspector (Mac: Cmd+Option+I).
+			{ key: 'J', ctrl: true, shift: true }, // Open Console Panel (Win/Linux).
+			{ key: 'J', ctrl: true, alt: true }, // Open Console Panel (Mac: Cmd+Option+J).
+			{ key: 'C', ctrl: true, shift: true }, // Target Element Selector (Win/Linux).
+			{ key: 'C', ctrl: true, alt: true }, // Target Element Selector (Mac: Cmd+Option+C).
+			{ key: 'K', ctrl: true, shift: true }, // Open Web Inspector, Firefox (Win/Linux).
+			{ key: 'K', ctrl: true, alt: true }, // Open Web Inspector, Firefox (Mac: Cmd+Option+K).
+			{ key: 'F7', shift: true }, // Open Style Editor, Firefox (Win/Linux: Shift+F7).
+			{ key: 'E', ctrl: true, alt: true }, // Open Style Editor, Firefox (Mac: Cmd+Option+E).
+			{ key: 'U', ctrl: true }, // View Source.
 		];
 		var customKeys = (config.blockedKeysCustom || []).map(function (k) {
 			return String(k).toUpperCase();
@@ -373,10 +440,16 @@
 				if (combo.key.toUpperCase() !== key) {
 					return false;
 				}
-				if (combo.ctrl && !(e.ctrlKey || e.metaKey)) {
+				// ctrl/cmd, shift, and alt/option are checked independently and must each match
+				// exactly (present when required, absent when not) so e.g. Ctrl+Shift+Alt+I
+				// doesn't false-match a combo that only asked for Ctrl+Shift+I.
+				if (!!combo.ctrl !== !!(e.ctrlKey || e.metaKey)) {
 					return false;
 				}
-				if (combo.shift && !e.shiftKey) {
+				if (!!combo.shift !== !!e.shiftKey) {
+					return false;
+				}
+				if (!!combo.alt !== !!e.altKey) {
 					return false;
 				}
 				return true;
