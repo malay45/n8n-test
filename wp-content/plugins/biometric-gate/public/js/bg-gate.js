@@ -42,6 +42,7 @@
 	var devtoolsCheckTimer = null;
 	var pausedMedia = [];
 	var activeStream = null;
+	var lastFullscreenElement = null;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe|usb video|software stream/i;
@@ -62,12 +63,23 @@
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
+		// Upgrade all YouTube embeds to support JS API so we can pause them globally
+		document.querySelectorAll('iframe').forEach(function (frame) {
+			if (frame.src && (frame.src.indexOf('youtube.com') !== -1 || frame.src.indexOf('youtu.be') !== -1) && frame.src.indexOf('enablejsapi=1') === -1) {
+				var sep = frame.src.indexOf('?') === -1 ? '?' : '&';
+				frame.src += sep + 'enablejsapi=1';
+			}
+		});
+
 		buildOverlayScaffold();
 		observeTampering();
 		setupInputBlocking();
 		startDevtoolsWatch();
 		setupIphoneVideoOverride();
+		
 		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.addEventListener('blur', onWindowBlur);
+		window.addEventListener('focus', onWindowFocus);
 		window.setInterval(function () {
 			if (reconnectPollTimer) return;
 
@@ -205,6 +217,16 @@
 	}
 
 	function showOverlay() {
+		lastFullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+		if (lastFullscreenElement) {
+			try {
+				if (document.exitFullscreen) document.exitFullscreen();
+				else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+				else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+				else if (document.msExitFullscreen) document.msExitFullscreen();
+			} catch (e) { /* ignore */ }
+		}
+
 		if (!overlayEl.open) {
 			overlayEl.showModal();
 		}
@@ -247,6 +269,16 @@
 
 		resumeAllMedia();
 
+		if (lastFullscreenElement) {
+			try {
+				if (lastFullscreenElement.requestFullscreen) lastFullscreenElement.requestFullscreen();
+				else if (lastFullscreenElement.webkitRequestFullscreen) lastFullscreenElement.webkitRequestFullscreen();
+				else if (lastFullscreenElement.mozRequestFullScreen) lastFullscreenElement.mozRequestFullScreen();
+				else if (lastFullscreenElement.msRequestFullscreen) lastFullscreenElement.msRequestFullscreen();
+			} catch(e) { /* ignore */ }
+			lastFullscreenElement = null;
+		}
+
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
@@ -274,7 +306,9 @@
 			var stillPresent = document.body.contains(overlayEl);
 			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
 
-			if (overlayEl.open && (!stillPresent || !stillVisible)) {
+			if (!stillPresent) {
+				killSwitch('overlay_tampered');
+			} else if (overlayEl.open && !stillVisible) {
 				killSwitch('overlay_tampered');
 			}
 		});
@@ -362,6 +396,12 @@
 	 * resetting to the Start button lets the student cleanly re-trigger instead of being stuck.
 	 */
 	function onVisibilityChange() {
+		if (document.hidden || document.visibilityState === 'hidden') {
+			pauseAllMedia();
+		} else if (!overlayEl || !overlayEl.open) {
+			resumeAllMedia();
+		}
+
 		if (document.hidden || !activeStream) {
 			return;
 		}
@@ -379,6 +419,16 @@
 				startBtn.disabled = false;
 				startBtn.hidden = false;
 			}
+		}
+	}
+
+	function onWindowBlur() {
+		pauseAllMedia();
+	}
+
+	function onWindowFocus() {
+		if (!document.hidden && (!overlayEl || !overlayEl.open)) {
+			resumeAllMedia();
 		}
 	}
 
@@ -450,6 +500,11 @@
 	function runScanCycle() {
 		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
 			.then(function (res) {
+				if (res && res.status === 'redirected') {
+					window.location.href = res.redirect_url || '/';
+					return;
+				}
+
 				if (res.bypass) {
 					if (isBlockingShell) {
 						window.location.reload();

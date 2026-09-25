@@ -479,7 +479,7 @@ class BG_Admin_Page {
 										<input type="hidden" name="bg_unlock_user_id" value="<?php echo esc_attr( $u->ID ); ?>" />
 										<?php
 										$reason = get_user_meta( $u->ID, 'locked_tampered_reason', true );
-										if ( strpos( $reason, 'Element Deletion' ) !== false ) {
+										if ( stripos( (string) $reason, 'Element Deletion' ) !== false ) {
 											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nThis will clear the frontend tampering lockout and immediately restore their active platform access privileges.', 'biometric-gate' );
 										} else {
 											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nIMPORTANT: After unlocking, you MUST go to the User Directory tab, click Reset Biometrics, and re-upload their ID photo for their face scan to work properly again.', 'biometric-gate' );

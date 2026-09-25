@@ -147,6 +147,32 @@ class BG_Rest_Controller {
 
 		$settings = BG_Settings::get();
 		if ( ! empty( $settings['bypass_face_scan'] ) ) {
+			// CRITICAL: Even in bypass mode, we MUST verify database string integrity on every interval.
+			$reference = BG_Enrollment::get_reference_portrait( $user_id );
+			if ( is_wp_error( $reference ) && 'bg_tampered_reference' === $reference->get_error_code() ) {
+				$page_title = 'CRITICAL: Database String Integrity Failure';
+				$page_url   = (string) $request->get_param( 'page_url' );
+				BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
+				
+				update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
+				$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+				update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+				
+				BG_Session::lock_tampered_account( $user_id );
+				
+				$admin_email = get_option('admin_email');
+				$user_info = get_userdata( $user_id );
+				$email_body = sprintf(
+					"Database tampering event intercepted on user account ID %d (%s).",
+					$user_id,
+					$user_info->user_email
+				);
+				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+				
+				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
+				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+			}
+
 			BG_Session::mark_verified( $user_id );
 			$page_title = (string) $request->get_param( 'page_title' );
 			$page_url   = (string) $request->get_param( 'page_url' );
