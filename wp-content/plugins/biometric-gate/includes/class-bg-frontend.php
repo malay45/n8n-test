@@ -52,6 +52,7 @@ class BG_Frontend {
 			'BiometricGateConfig',
 			array(
 				'restUrl'          => esc_url_raw( rest_url( BG_REST_NAMESPACE ) ),
+				'pluginUrl'        => esc_url_raw( BG_PLUGIN_URL ),
 				'nonce'            => wp_create_nonce( 'wp_rest' ),
 				'hasValidSession'  => BG_Session::is_within_guard_window( $user_id ),
 				'hasEnrollment'    => BG_Enrollment::has_enrollment( $user_id ),

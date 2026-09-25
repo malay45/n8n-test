@@ -16,6 +16,49 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// ============================================================================
+// ULTRA-FAST HEARTBEAT INTERCEPT (Sub-50ms)
+// Placed at the absolute top of the plugin execution flow to bypass loading 
+// any subsequent plugins, themes, or the heavy WordPress REST API core.
+// ============================================================================
+if ( isset( $_SERVER['REQUEST_METHOD'] ) && $_SERVER['REQUEST_METHOD'] === 'GET' ) {
+	$bg_is_status = false;
+	if ( isset( $_SERVER['REQUEST_URI'] ) && strpos( $_SERVER['REQUEST_URI'], 'biometric-gate/v1/session/status' ) !== false ) {
+		$bg_is_status = true;
+	} elseif ( isset( $_GET['rest_route'] ) && strpos( $_GET['rest_route'], 'biometric-gate/v1/session/status' ) !== false ) {
+		$bg_is_status = true;
+	}
+
+	if ( $bg_is_status ) {
+		// We need pluggable for auth checks
+		if ( ! function_exists( 'is_user_logged_in' ) ) {
+			require_once ABSPATH . WPINC . '/pluggable.php';
+		}
+
+		$nonce = isset( $_SERVER['HTTP_X_WP_NONCE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_WP_NONCE'] ) ) : '';
+		if ( ! $nonce || ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+			status_header( 403 );
+			die( 'Forbidden' );
+		}
+
+		if ( ! is_user_logged_in() ) {
+			status_header( 401 );
+			die( 'Unauthorized' );
+		}
+
+		require_once plugin_dir_path( __FILE__ ) . 'includes/class-bg-session.php';
+		require_once plugin_dir_path( __FILE__ ) . 'includes/class-bg-settings.php';
+		
+		$user_id = get_current_user_id();
+		$valid   = BG_Session::has_valid_session( $user_id ) ? '1' : '0';
+		$bypass  = BG_Session::is_bypassed( $user_id ) ? '1' : '0';
+		$locked  = BG_Session::is_locked( $user_id ) ? '1' : '0';
+
+		header( 'Content-Type: text/plain; charset=utf-8' );
+		die( "{$valid}|{$bypass}|{$locked}" );
+	}
+}
+
 define( 'BG_PLUGIN_FILE', __FILE__ );
 define( 'BG_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BG_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

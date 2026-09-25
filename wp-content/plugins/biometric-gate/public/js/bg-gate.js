@@ -86,6 +86,19 @@
 					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
 						throw new Error('Network down');
 					}
+					return res.text();
+				})
+				.then(function (text) {
+					// Raw data text string parsed: valid|bypass|locked
+					if (text && text.indexOf('|') !== -1) {
+						var parts = text.split('|');
+						if (parts[2] === '1') {
+							// If account became locked in background
+							if (!isBlockingShell && !overlayEl.open) {
+								window.location.reload();
+							}
+						}
+					}
 				})
 				.catch(function () {
 					if (!reconnectPollTimer) showConnectionLost();

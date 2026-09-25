@@ -441,7 +441,7 @@ class BG_Admin_Page {
 		) );
 		?>
 		<div class="wrap">
-			<p><?php esc_html_e( 'These users have been locked out due to a Database String Integrity Failure. Their reference photos are safe, but their database paths have been modified or corrupted.', 'biometric-gate' ); ?></p>
+			<p><?php esc_html_e( 'These users have been locked out due to a Database String Integrity Failure or Frontend Code Tampering. Their reference photos are safe, but their database paths have been modified or corrupted.', 'biometric-gate' ); ?></p>
 
 			<table class="widefat striped">
 				<thead>
@@ -477,7 +477,15 @@ class BG_Admin_Page {
 									<form method="post" style="display:inline;">
 										<?php wp_nonce_field( 'bg_unlock_tampered', 'bg_unlock_nonce' ); ?>
 										<input type="hidden" name="bg_unlock_user_id" value="<?php echo esc_attr( $u->ID ); ?>" />
-										<button type="submit" class="button button-primary" onclick="return confirm('<?php esc_attr_e( 'Are you sure you want to verify and unlock this profile?\n\nIMPORTANT: After unlocking, you MUST go to the User Directory tab, click Reset Biometrics, and re-upload their ID photo for their face scan to work properly again.', 'biometric-gate' ); ?>');"><?php esc_html_e( 'Verify & Unlock Profile', 'biometric-gate' ); ?></button>
+										<?php
+										$reason = get_user_meta( $u->ID, 'locked_tampered_reason', true );
+										if ( strpos( $reason, 'Element Deletion' ) !== false ) {
+											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nThis will clear the frontend tampering lockout and immediately restore their active platform access privileges.', 'biometric-gate' );
+										} else {
+											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nIMPORTANT: After unlocking, you MUST go to the User Directory tab, click Reset Biometrics, and re-upload their ID photo for their face scan to work properly again.', 'biometric-gate' );
+										}
+										?>
+										<button type="submit" class="button button-primary" onclick="return confirm('<?php echo esc_attr( $confirm_msg ); ?>');"><?php esc_html_e( 'Verify & Unlock Profile', 'biometric-gate' ); ?></button>
 									</form>
 								</td>
 							</tr>
