@@ -89,7 +89,7 @@ class BG_Admin_Page {
 
 	private static function current_tab() {
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'a'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		return in_array( $tab, array( 'a', 'b', 'c' ), true ) ? $tab : 'a';
+		return in_array( $tab, array( 'a', 'a2', 'b', 'c' ), true ) ? $tab : 'a';
 	}
 
 	public static function maybe_enqueue( $hook ) {
@@ -159,12 +159,15 @@ class BG_Admin_Page {
 			<h1><?php esc_html_e( 'Biometric Gate', 'biometric-gate' ); ?></h1>
 			<h2 class="nav-tab-wrapper">
 				<a href="<?php echo esc_url( self::tab_url( 'a' ) ); ?>" class="nav-tab <?php echo 'a' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'User Directory', 'biometric-gate' ); ?></a>
+				<a href="<?php echo esc_url( self::tab_url( 'a2' ) ); ?>" class="nav-tab <?php echo 'a2' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Lockout Security Center', 'biometric-gate' ); ?></a>
 				<a href="<?php echo esc_url( self::tab_url( 'b' ) ); ?>" class="nav-tab <?php echo 'b' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Global Settings', 'biometric-gate' ); ?></a>
 				<a href="<?php echo esc_url( self::tab_url( 'c' ) ); ?>" class="nav-tab <?php echo 'c' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Live Audit Log', 'biometric-gate' ); ?></a>
 			</h2>
 
 			<?php if ( 'b' === $tab ) : ?>
 				<?php self::render_settings_tab(); ?>
+			<?php elseif ( 'a2' === $tab ) : ?>
+				<?php self::render_lockout_security_center(); ?>
 			<?php else : ?>
 				<div id="bg-admin-root" data-tab="<?php echo esc_attr( $tab ); ?>">
 					<p><?php esc_html_e( 'Loading…', 'biometric-gate' ); ?></p>
@@ -200,10 +203,13 @@ class BG_Admin_Page {
 				'min_confidence_percent' => isset( $_POST['min_confidence_percent'] ) ? wp_unslash( $_POST['min_confidence_percent'] ) : '',
 				'fail_action'         => isset( $_POST['fail_action'] ) ? wp_unslash( $_POST['fail_action'] ) : 'logout',
 				'fail_redirect_url'   => isset( $_POST['fail_redirect_url'] ) ? wp_unslash( $_POST['fail_redirect_url'] ) : '',
-				'close_button_redirect_url' => isset( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : '',
+				'close_button_redirect_url' => ! empty( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : home_url(),
+				'close_confirm_message' => isset( $_POST['close_confirm_message'] ) ? wp_unslash( $_POST['close_confirm_message'] ) : '',
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
 				'block_devtools_shortcuts' => isset( $_POST['block_devtools_shortcuts'] ),
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
+				'force_native_ios' => isset( $_POST['force_native_ios'] ),
+				'bypass_face_scan' => isset( $_POST['bypass_face_scan'] ),
 			);
 
 			$clean = BG_Settings::sanitize( $input );
@@ -231,6 +237,20 @@ class BG_Admin_Page {
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="force_native_ios" value="1" <?php checked( ! empty( $settings['force_native_ios'] ) ); ?> /> <?php esc_html_e( 'Force Native iOS Player on iPhones', 'biometric-gate' ); ?></label>
+						<p class="description"><?php esc_html_e( 'When checked, forces videos into the native iOS player when viewed in full-screen on iPhones ONLY to hide the browser URL bar. Does not affect iPads or other devices, and keeps all biometric security fully active.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Bypass Face Scan Overlay (Keep Background Logs Active)', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="bypass_face_scan" value="1" <?php checked( ! empty( $settings['bypass_face_scan'] ) ); ?> /> <?php esc_html_e( 'Bypass Face Scan Overlay (Keep Background Logs Active)', 'biometric-gate' ); ?></label>
+						<p class="description"><?php esc_html_e( 'Emergency override: Suppresses the visual camera popup and blur shield for student troubleshooting. All background security engines, dynamic threshold timer logs, and background tracking matrices remain fully operational.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><label for="scan_threshold_secs"><?php esc_html_e( 'Scan Frequency Threshold (Seconds)', 'biometric-gate' ); ?></label></th>
 					<td><input type="number" min="1" step="1" name="scan_threshold_secs" id="scan_threshold_secs" value="<?php echo esc_attr( $settings['scan_threshold_secs'] ); ?>" class="small-text" /></td>
 				</tr>
@@ -252,7 +272,7 @@ class BG_Admin_Page {
 					<th scope="row"><label for="retention"><?php esc_html_e( 'Log Retention Purge Limit', 'biometric-gate' ); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach ( array( '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
+							<?php foreach ( array( '1' => '1 Day', '7' => '7 Days', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $settings['retention'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select>
@@ -325,6 +345,13 @@ class BG_Admin_Page {
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php esc_html_e( 'Database Tampering Redirection URL', 'biometric-gate' ); ?></th>
+					<td>
+						<input type="url" name="tampered_redirect_url" placeholder="<?php echo esc_url( home_url() ); ?>" value="<?php echo esc_attr( $settings['tampered_redirect_url'] ); ?>" class="regular-text" />
+						<p class="description"><?php esc_html_e( 'If a corrupted or tampered database string is detected, the user is locked out, their session is cleared, and they are redirected to this URL (Home Page by default).', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><?php esc_html_e( 'Granular Kill-Switch Settings', 'biometric-gate' ); ?></th>
 					<td>
 						<table class="widefat" style="max-width:720px;">
@@ -381,10 +408,97 @@ class BG_Admin_Page {
 						<p class="description"><?php esc_html_e( 'Where a student lands if they click Close on the scan overlay and confirm they want to leave. This never grants access to protected content — it only lets them exit gracefully.', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
+				<tr>
+					<th scope="row"><label for="close_confirm_message"><?php esc_html_e( 'Close Button Confirmation Message', 'biometric-gate' ); ?></label></th>
+					<td>
+						<textarea name="close_confirm_message" id="close_confirm_message" rows="3" class="large-text"><?php echo esc_textarea( $settings['close_confirm_message'] ); ?></textarea>
+						<p class="description"><?php esc_html_e( 'The message shown in the browser confirmation dialog when a student clicks the Close button on the scan overlay.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
 			</table>
 
 			<?php submit_button( __( 'Save Settings', 'biometric-gate' ) ); ?>
 		</form>
+		<?php
+	}
+
+	// ---------------------------------------------------------------------
+	// Tab A2: Lockout Security Center
+	// ---------------------------------------------------------------------
+
+	private static function render_lockout_security_center() {
+		if ( isset( $_POST['bg_unlock_user_id'] ) && isset( $_POST['bg_unlock_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['bg_unlock_nonce'] ) ), 'bg_unlock_tampered' ) ) {
+			$unlock_user_id = absint( $_POST['bg_unlock_user_id'] );
+			if ( $unlock_user_id ) {
+				BG_Session::unlock_tampered_account( $unlock_user_id );
+				echo '<div class="notice notice-success"><p>' . esc_html__( 'User profile verified and unlocked.', 'biometric-gate' ) . '</p></div>';
+			}
+		}
+
+		$locked_users = get_users( array(
+			'meta_key' => 'locked_tampered',
+			'meta_compare' => 'EXISTS',
+		) );
+		?>
+		<div class="wrap">
+			<p><?php esc_html_e( 'These users have been locked out due to a Database String Integrity Failure or Frontend Code Tampering. Their reference photos are safe, but their database paths have been modified or corrupted.', 'biometric-gate' ); ?></p>
+
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'User ID', 'biometric-gate' ); ?></th>
+						<th><?php esc_html_e( 'Student Name / Email', 'biometric-gate' ); ?></th>
+						<th><?php esc_html_e( 'Timestamp of Event', 'biometric-gate' ); ?></th>
+						<th><?php esc_html_e( 'Lockout Reason Code', 'biometric-gate' ); ?></th>
+						<th><?php esc_html_e( 'Security Violations', 'biometric-gate' ); ?></th>
+						<th><?php esc_html_e( 'Actions', 'biometric-gate' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php if ( empty( $locked_users ) ) : ?>
+						<tr>
+							<td colspan="3"><?php esc_html_e( 'No locked profiles currently.', 'biometric-gate' ); ?></td>
+						</tr>
+					<?php else : ?>
+						<?php foreach ( $locked_users as $u ) : ?>
+							<tr>
+								<td><?php echo esc_html( $u->ID ); ?></td>
+								<td><?php echo esc_html( $u->display_name . ' (' . $u->user_email . ')' ); ?></td>
+								<td><?php
+									$timestamp = get_user_meta( $u->ID, 'locked_tampered', true );
+									echo esc_html( $timestamp );
+								?></td>
+								<td><?php
+									$reason = get_user_meta( $u->ID, 'locked_tampered_reason', true );
+									echo esc_html( $reason ? $reason : 'Unknown' );
+								?></td>
+								<td><?php echo (int) get_user_meta( $u->ID, 'biometric_strikes', true ); ?></td>
+								<td>
+									<form method="post" style="display:inline;">
+										<?php wp_nonce_field( 'bg_unlock_tampered', 'bg_unlock_nonce' ); ?>
+										<input type="hidden" name="bg_unlock_user_id" value="<?php echo esc_attr( $u->ID ); ?>" />
+										<?php
+										$reason = get_user_meta( $u->ID, 'locked_tampered_reason', true );
+										if ( stripos( (string) $reason, 'Element Deletion' ) !== false ) {
+											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nThis will clear the frontend tampering lockout and immediately restore their active platform access privileges.', 'biometric-gate' );
+										} else {
+											$confirm_msg = __( 'Are you sure you want to verify and unlock this profile?\n\nIMPORTANT: After unlocking, you MUST go to the User Directory tab, click Reset Biometrics, and re-upload their ID photo for their face scan to work properly again.', 'biometric-gate' );
+										}
+										?>
+										<button type="submit" class="button button-primary" onclick="return confirm('<?php echo esc_attr( $confirm_msg ); ?>');"><?php esc_html_e( 'Verify & Unlock Profile', 'biometric-gate' ); ?></button>
+									</form>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					<?php endif; ?>
+				</tbody>
+			</table>
+			<br />
+			<div class="card">
+				<h3><?php esc_html_e( 'Tampering Redirection Settings', 'biometric-gate' ); ?></h3>
+				<p><?php esc_html_e( 'To change the URL that tampered accounts are redirected to, please go to the Global Settings tab.', 'biometric-gate' ); ?></p>
+			</div>
+		</div>
 		<?php
 	}
 

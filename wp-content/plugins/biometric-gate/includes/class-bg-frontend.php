@@ -52,6 +52,7 @@ class BG_Frontend {
 			'BiometricGateConfig',
 			array(
 				'restUrl'          => esc_url_raw( rest_url( BG_REST_NAMESPACE ) ),
+				'pluginUrl'        => esc_url_raw( BG_PLUGIN_URL ),
 				'nonce'            => wp_create_nonce( 'wp_rest' ),
 				'hasValidSession'  => BG_Session::is_within_guard_window( $user_id ),
 				'hasEnrollment'    => BG_Enrollment::has_enrollment( $user_id ),
@@ -74,6 +75,8 @@ class BG_Frontend {
 
 				'blockDevtoolsShortcuts' => (bool) $settings['block_devtools_shortcuts'],
 				'blockedKeysCustom'      => wp_parse_list( $settings['blocked_keys_custom'] ),
+				'forceNativeIos'         => ! empty( $settings['force_native_ios'] ),
+				'bypassFaceScan'         => ! empty( $settings['bypass_face_scan'] ),
 				'closeButtonRedirectUrl' => esc_url_raw( $settings['close_button_redirect_url'] ),
 
 				'i18n'             => array(
@@ -87,7 +90,7 @@ class BG_Frontend {
 					'tooBright'      => __( 'Too much light/glare detected. Please reduce backlighting and try again.', 'biometric-gate' ),
 					'centerFace'     => __( 'Center your profile in the frame.', 'biometric-gate' ),
 					'moveCloser'     => __( 'Move closer to the lens.', 'biometric-gate' ),
-					'closeConfirm'   => __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' ),
+					'closeConfirm'   => $settings['close_confirm_message'],
 					'closeButton'    => __( 'Close', 'biometric-gate' ),
 				),
 			)

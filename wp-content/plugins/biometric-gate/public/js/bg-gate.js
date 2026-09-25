@@ -42,9 +42,10 @@
 	var devtoolsCheckTimer = null;
 	var pausedMedia = [];
 	var activeStream = null;
+	var lastFullscreenElement = null;
 
 	var MAX_RETRIES = 3;
-	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe/i;
+	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe|usb video|software stream/i;
 
 	// Final submitted-frame size, portrait-oriented to match the oval guide mask. Bumped up
 	// from an earlier 320x240: low capture resolution was a real contributor to match
@@ -54,7 +55,7 @@
 	var CAPTURE_WIDTH = 480;
 	var CAPTURE_HEIGHT = 600;
 
-	var DARKNESS_THRESHOLD = 40; // 0-255 average perceptual luminance; heuristic, tune after real-world testing.
+	var DARKNESS_THRESHOLD = 10; // Bumped slightly to 10, but 40 is too strict.
 	var BRIGHTNESS_THRESHOLD = 235; // Overexposure/glare ceiling on the same 0-255 scale.
 	var DEVTOOLS_SIZE_THRESHOLD = 160; // px delta between outer/inner window — heuristic, imperfect by nature.
 	var MEDIA_RESCAN_INTERVAL_MS = 500; // Re-sweep for newly-added/reinitialized players while locked out.
@@ -62,11 +63,59 @@
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
+		// Upgrade all YouTube embeds to support JS API so we can pause them globally
+		document.querySelectorAll('iframe').forEach(function (frame) {
+			if (frame.src && (frame.src.indexOf('youtube.com') !== -1 || frame.src.indexOf('youtu.be') !== -1) && frame.src.indexOf('enablejsapi=1') === -1) {
+				var sep = frame.src.indexOf('?') === -1 ? '?' : '&';
+				frame.src += sep + 'enablejsapi=1';
+			}
+		});
+
 		buildOverlayScaffold();
 		observeTampering();
 		setupInputBlocking();
 		startDevtoolsWatch();
+		setupIphoneVideoOverride();
+		
 		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.addEventListener('blur', onWindowBlur);
+		window.addEventListener('focus', onWindowFocus);
+		window.setInterval(function () {
+			if (reconnectPollTimer) return;
+
+			if (!navigator.onLine) {
+				showConnectionLost();
+				return;
+			}
+
+			fetch(config.restUrl + '/session/status', {
+				method: 'GET',
+				headers: { 'X-WP-Nonce': config.nonce },
+				cache: 'no-cache'
+			})
+				.then(function (res) {
+					// Only treat actual network drops as a disconnect, not 403/401 errors.
+					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
+						throw new Error('Network down');
+					}
+					return res.text();
+				})
+				.then(function (text) {
+					// Raw data text string parsed: valid|bypass|locked
+					if (text && text.indexOf('|') !== -1) {
+						var parts = text.split('|');
+						if (parts[2] === '1') {
+							// If account became locked in background
+							if (!isBlockingShell && !overlayEl.open) {
+								window.location.reload();
+							}
+						}
+					}
+				})
+				.catch(function () {
+					if (!reconnectPollTimer) showConnectionLost();
+				});
+		}, 5000);
 		runScanCycle();
 	}
 
@@ -74,16 +123,35 @@
 		return !!(config.killSwitchesEnabled && config.killSwitchesEnabled[type]);
 	}
 
+	function setupIphoneVideoOverride() {
+		if (!config.forceNativeIos) return;
+		var isIphone = /iPhone/i.test(navigator.userAgent) && !/iPad/i.test(navigator.userAgent);
+		if (!isIphone) return;
+
+		var reqFs = Element.prototype.requestFullscreen || Element.prototype.webkitRequestFullscreen || Element.prototype.mozRequestFullScreen || Element.prototype.msRequestFullscreen;
+
+		if (reqFs) {
+			var overrideFn = function () {
+				var video = (this.tagName && this.tagName.toLowerCase() === 'video') ? this : this.querySelector('video');
+				if (video && typeof video.webkitEnterFullscreen === 'function') {
+					return video.webkitEnterFullscreen();
+				}
+				return reqFs.apply(this, arguments);
+			};
+			Element.prototype.requestFullscreen = overrideFn;
+			if (Element.prototype.webkitRequestFullscreen) Element.prototype.webkitRequestFullscreen = overrideFn;
+			if (Element.prototype.mozRequestFullScreen) Element.prototype.mozRequestFullScreen = overrideFn;
+			if (Element.prototype.msRequestFullscreen) Element.prototype.msRequestFullscreen = overrideFn;
+		}
+	}
+
 	// ---------------------------------------------------------------------
 	// Overlay DOM
 	// ---------------------------------------------------------------------
 
 	function buildOverlayScaffold() {
-		overlayEl = document.createElement('div');
+		overlayEl = document.createElement('dialog');
 		overlayEl.id = 'bg-gate-overlay';
-		overlayEl.setAttribute('role', 'dialog');
-		overlayEl.setAttribute('aria-modal', 'true');
-		overlayEl.hidden = true;
 
 		overlayEl.innerHTML =
 			'<button type="button" class="bg-gate-close-btn">' + (config.i18n.closeButton || 'Close') + '</button>' +
@@ -149,7 +217,19 @@
 	}
 
 	function showOverlay() {
-		overlayEl.hidden = false;
+		lastFullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+		if (lastFullscreenElement) {
+			try {
+				if (document.exitFullscreen) document.exitFullscreen();
+				else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+				else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+				else if (document.msExitFullscreen) document.msExitFullscreen();
+			} catch (e) { /* ignore */ }
+		}
+
+		if (!overlayEl.open) {
+			overlayEl.showModal();
+		}
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -161,7 +241,6 @@
 
 		if (!isBlockingShell) {
 			document.documentElement.classList.add('bg-gate-blur-active');
-			exitNativeFullscreen();
 
 			pausedMedia = [];
 			pauseAllMedia();
@@ -178,7 +257,9 @@
 
 	function hideOverlay() {
 		intentionalHide = true;
-		overlayEl.hidden = true;
+		if (overlayEl.open) {
+			overlayEl.close();
+		}
 		document.documentElement.classList.remove('bg-gate-blur-active');
 
 		if (mediaRescanTimer) {
@@ -187,6 +268,17 @@
 		}
 
 		resumeAllMedia();
+
+		if (lastFullscreenElement) {
+			try {
+				if (lastFullscreenElement.requestFullscreen) lastFullscreenElement.requestFullscreen();
+				else if (lastFullscreenElement.webkitRequestFullscreen) lastFullscreenElement.webkitRequestFullscreen();
+				else if (lastFullscreenElement.mozRequestFullScreen) lastFullscreenElement.mozRequestFullScreen();
+				else if (lastFullscreenElement.msRequestFullscreen) lastFullscreenElement.msRequestFullscreen();
+			} catch(e) { /* ignore */ }
+			lastFullscreenElement = null;
+		}
+
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
@@ -196,27 +288,7 @@
 		}, 0);
 	}
 
-	/**
-	 * A CSS z-index can never beat a native-fullscreened element's browser-level top layer —
-	 * that's why the scan modal was opening *behind* a fullscreen lesson video. The only fix
-	 * is to force a real exit from fullscreen before showing the overlay.
-	 */
-	function exitNativeFullscreen() {
-		var fsElement = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
-		if (!fsElement) {
-			return;
-		}
 
-		try {
-			if (document.exitFullscreen) {
-				document.exitFullscreen().catch(function () { /* noop */ });
-			} else if (document.webkitExitFullscreen) {
-				document.webkitExitFullscreen();
-			} else if (document.msExitFullscreen) {
-				document.msExitFullscreen();
-			}
-		} catch (e) { /* noop */ }
-	}
 
 	function setStatus(text, isHtml) {
 		if (isHtml) {
@@ -232,14 +304,16 @@
 				return;
 			}
 			var stillPresent = document.body.contains(overlayEl);
-			var stillVisible = stillPresent && 'none' !== window.getComputedStyle(overlayEl).display && !overlayEl.hidden;
+			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
 
-			if (!overlayEl.hidden && (!stillPresent || !stillVisible)) {
+			if (!stillPresent) {
+				killSwitch('overlay_tampered');
+			} else if (overlayEl.open && !stillVisible) {
 				killSwitch('overlay_tampered');
 			}
 		});
 
-		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
 	}
 
 	/**
@@ -322,6 +396,12 @@
 	 * resetting to the Start button lets the student cleanly re-trigger instead of being stuck.
 	 */
 	function onVisibilityChange() {
+		if (document.hidden || document.visibilityState === 'hidden') {
+			pauseAllMedia();
+		} else if (!overlayEl || !overlayEl.open) {
+			resumeAllMedia();
+		}
+
 		if (document.hidden || !activeStream) {
 			return;
 		}
@@ -334,11 +414,21 @@
 			stopStream(activeStream);
 			activeStream = null;
 
-			if (overlayEl && !overlayEl.hidden) {
+			if (overlayEl && overlayEl.open) {
 				setStatus('');
 				startBtn.disabled = false;
 				startBtn.hidden = false;
 			}
+		}
+	}
+
+	function onWindowBlur() {
+		pauseAllMedia();
+	}
+
+	function onWindowFocus() {
+		if (!document.hidden && (!overlayEl || !overlayEl.open)) {
+			resumeAllMedia();
 		}
 	}
 
@@ -350,10 +440,21 @@
 	 * so a player that mounts or resumes mid-lockout still gets caught and paused.
 	 */
 	function pauseAllMedia() {
-		var mediaElements = document.querySelectorAll('video, audio');
+		// Include Presto Player web components in the media element query
+		var mediaElements = document.querySelectorAll('video, audio, presto-player, presto-youtube, presto-vimeo, presto-video');
 		mediaElements.forEach(function (el) {
+			if (el === videoEl) {
+				return;
+			}
 			try {
-				var isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
+				var isPlaying = false;
+				if (el.tagName && el.tagName.toLowerCase().indexOf('presto') !== -1) {
+					// We always want to resume presto players since we can't reliably read their state synchronously
+					isPlaying = true;
+				} else {
+					isPlaying = (el.currentTime > 0 && !el.paused && !el.ended && el.readyState > 2);
+				}
+
 				if (isPlaying && -1 === pausedMedia.indexOf(el)) {
 					pausedMedia.push(el);
 				}
@@ -364,8 +465,13 @@
 		});
 		document.querySelectorAll('iframe').forEach(function (frame) {
 			try {
+				if (-1 === pausedMedia.indexOf(frame)) {
+					pausedMedia.push(frame);
+				}
 				frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
 				frame.contentWindow.postMessage(JSON.stringify({ method: 'pause' }), '*');
+				frame.contentWindow.postMessage('{"method":"pause"}', '*');
+				frame.contentWindow.postMessage('pause', '*');
 			} catch (e) { /* skip */ }
 		});
 	}
@@ -375,6 +481,12 @@
 			try {
 				if (typeof el.play === 'function') {
 					el.play();
+				}
+				if (el.tagName && el.tagName.toLowerCase() === 'iframe') {
+					el.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+					el.contentWindow.postMessage(JSON.stringify({ method: 'play' }), '*');
+					el.contentWindow.postMessage('{"method":"play"}', '*');
+					el.contentWindow.postMessage('play', '*');
 				}
 			} catch (e) { /* noop */ }
 		});
@@ -388,6 +500,11 @@
 	function runScanCycle() {
 		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
 			.then(function (res) {
+				if (res && res.status === 'redirected') {
+					window.location.href = res.redirect_url || '/';
+					return;
+				}
+
 				if (res.bypass) {
 					if (isBlockingShell) {
 						window.location.reload();
@@ -417,14 +534,63 @@
 
 		startBtn.disabled = true;
 
+		// CRITICAL FIX: If a stream exists but the video element is not playing or 
+		// the stream is dead, stop it and request a fresh one.
+		if (activeStream) {
+			var isStreamLive = activeStream.getVideoTracks().every(function (t) {
+				return 'live' === t.readyState;
+			});
+
+			// If the stream is dead or the video element is not rendering, kill it.
+			if (!isStreamLive || videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+				stopStream(activeStream);
+				activeStream = null;
+			}
+		}
+
 		if (activeStream) {
 			captureAndSubmit(activeStream, false);
 		} else {
 			setStatus(config.i18n.verifying || "Starting camera...");
-			navigator.mediaDevices.getUserMedia({ video: buildVideoConstraints() })
+			getValidCameraStream()
 				.then(auditDevicesThenCapture)
 				.catch(handleCameraError);
 		}
+	}
+
+	function getValidCameraStream() {
+		// 1. Get initial generic stream to prompt permissions and unmask device labels in the browser.
+		return navigator.mediaDevices.getUserMedia({ video: true })
+			.then(function (initialStream) {
+				// 2. Enumerate all devices now that labels are fully visible.
+				return navigator.mediaDevices.enumerateDevices().then(function (devices) {
+					var videoDevices = devices.filter(function (d) { return d.kind === 'videoinput'; });
+					var validDevice = null;
+
+					for (var i = 0; i < videoDevices.length; i++) {
+						var label = (videoDevices[i].label || '').trim().toLowerCase();
+						if (label && !VIRTUAL_CAMERA_PATTERN.test(label)) {
+							validDevice = videoDevices[i];
+							break;
+						}
+					}
+
+					// 3. Stop the initial generic stream so we can request the specific one with ideal constraints.
+					stopStream(initialStream);
+
+					var constraints = buildVideoConstraints();
+
+					// 4. Force target the first physical hardware camera found.
+					if (validDevice) {
+						constraints.deviceId = { exact: validDevice.deviceId };
+						try {
+							window.localStorage.setItem('bg_preferred_camera_id', validDevice.deviceId);
+						} catch (e) { /* noop */ }
+					}
+
+					return navigator.mediaDevices.getUserMedia({ video: constraints });
+				});
+			});
 	}
 
 	function buildVideoConstraints() {
@@ -489,7 +655,13 @@
 	 * already-drawn canvas frame — cheap enough to run on every capture attempt.
 	 */
 	function measureAverageLuminance(ctx) {
-		var data = ctx.getImageData(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT).data;
+		// Sample only the center 50% of the frame to prevent dark backgrounds 
+		// or letterboxing black bars from skewing the average, guaranteeing we measure the face!
+		var w = CAPTURE_WIDTH * 0.5;
+		var h = CAPTURE_HEIGHT * 0.5;
+		var x = CAPTURE_WIDTH * 0.25;
+		var y = CAPTURE_HEIGHT * 0.25;
+		var data = ctx.getImageData(x, y, w, h).data;
 		var total = 0;
 		var count = 0;
 
@@ -518,23 +690,33 @@
 		var srcY = (videoH - srcH) / 2;
 
 		ctx.clearRect(0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-		// Unsupported browsers simply ignore an unrecognized filter value rather than
-		// throwing, so this degrades gracefully on older WebKit builds.
-		ctx.filter = 'contrast(1.1) brightness(1.05) saturate(1.05)';
+
+		// CRITICAL FIREFOX FIX: NEVER use ctx.filter = '...' here!
+		// Firefox has a known engine bug where applying filters while drawing 
+		// a live WebRTC video feed turns the entire canvas completely pitch black!
 		ctx.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-		ctx.filter = 'none';
 	}
 
 	function captureAndSubmit(stream, isFirstTime) {
 		if (isFirstTime) {
+			// CRITICAL FIX: Explicitly clear and reset the video element 
+			// to prevent stale frames from the previous stream.
+			videoEl.pause();
+			videoEl.srcObject = null;
+			videoEl.load(); // Forces the browser to release the old stream
+
 			videoEl.srcObject = stream;
+
+			// Ensure the video is muted and plays inline (required for autoplay policies)
+			videoEl.muted = true;
+			videoEl.playsInline = true;
 		}
 
 		return new Promise(function (resolve) {
 			var takePicture = function () {
 				setStatus(config.i18n.verifying || "Verifying...");
 
-				var ctx = canvasEl.getContext('2d');
+				var ctx = canvasEl.getContext('2d', { willReadFrequently: true });
 				drawNormalizedFrame(ctx);
 
 				var luminance = measureAverageLuminance(ctx);
@@ -568,45 +750,63 @@
 				);
 			};
 
+			var startCountdown = function () {
+				// Double check that the video is actually rendering frames
+				if (videoEl.readyState < 2 || videoEl.videoWidth === 0) {
+					setTimeout(startCountdown, 100); // Wait 100ms and try again
+					return;
+				}
+
+				var countdown = 3;
+				var guidance = [config.i18n.centerFace, config.i18n.moveCloser];
+				var guidanceIndex = 0;
+
+				setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
+
+				var interval = setInterval(function () {
+					countdown--;
+					guidanceIndex = (guidanceIndex + 1) % guidance.length;
+
+					if (countdown > 0) {
+						setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
+					} else {
+						clearInterval(interval);
+						takePicture();
+					}
+				}, 1000);
+			};
+
 			if (isFirstTime) {
-				videoEl.onloadeddata = function () {
-					var countdown = 3;
-					var guidance = [config.i18n.centerFace, config.i18n.moveCloser];
-					var guidanceIndex = 0;
-
-					setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
-
-					var interval = setInterval(function () {
-						countdown--;
-						guidanceIndex = (guidanceIndex + 1) % guidance.length;
-
-						if (countdown > 0) {
-							setStatus((guidance[guidanceIndex] || '') + ' (' + countdown + ')');
-						} else {
-							clearInterval(interval);
-							takePicture();
-						}
-					}, 1000);
+				videoEl.onloadedmetadata = function () {
+					// Explicitly play the video to kickstart the WebRTC pipeline
+					var playPromise = videoEl.play();
+					if (playPromise !== undefined) {
+						playPromise.then(startCountdown).catch(function (err) {
+							console.error("Video play failed:", err);
+							// Fallback: try to start countdown anyway if play() is blocked
+							startCountdown();
+						});
+					} else {
+						startCountdown();
+					}
 				};
 			} else {
-				takePicture();
+				startCountdown();
 			}
 		});
 	}
 
 	function handleCameraError(err) {
-		var name = err && err.name ? err.name : '';
+		// As requested: if a student's webcam is missing or disabled in their browser, 
+		// automatically stop the scan from firing and neatly display the custom text block 
+		// instead of giving them a failure strike.
+		setStatus(config.noCameraMessage || config.i18n.noCamera, true);
+		startBtn.disabled = false;
 
-		if ('NotFoundError' === name || 'OverconstrainedError' === name) {
-			setStatus(config.noCameraMessage || config.i18n.noCamera, true);
-			startBtn.disabled = false;
-			return;
+		if (activeStream) {
+			stopStream(activeStream);
+			activeStream = null;
 		}
-
-		// Permission denied, or any other getUserMedia failure — counts as a failed attempt,
-		// same as a failed face match, so a student can't dodge verification by repeatedly
-		// declining the camera prompt.
-		handleScanError({ code: 'bg_camera_denied', message: config.i18n.scanFailed });
 	}
 
 	function stopStream(stream) {
@@ -616,6 +816,11 @@
 	}
 
 	function handleScanSuccess(res) {
+		if (res && res.status === 'redirected') {
+			window.location.href = res.redirect_url || '/';
+			return;
+		}
+
 		retryCount = 0;
 		hideOverlay();
 
@@ -679,6 +884,10 @@
 	function showConnectionLost() {
 		showOverlay();
 		startBtn.hidden = true;
+
+		var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+		if (videoFrame) videoFrame.style.display = 'none';
+
 		setStatus(config.i18n.connectionLost);
 
 		if (!reconnectPollTimer) {
@@ -697,6 +906,10 @@
 			reconnectPollTimer = null;
 		}
 		startBtn.hidden = false;
+
+		var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+		if (videoFrame) videoFrame.style.display = '';
+
 		runScanCycle();
 	}
 
@@ -721,7 +934,7 @@
 			window.location.href = redirectUrl || '/';
 		};
 
-		apiPost('/session/killswitch', { reason: reason })
+		apiPost('/session/killswitch', { reason: reason, page_url: config.pageUrl })
 			.then(function (res) {
 				navigateAway(res && res.redirect_url);
 			})

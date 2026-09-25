@@ -145,6 +145,48 @@ class BG_Rest_Controller {
 			);
 		}
 
+		$settings = BG_Settings::get();
+		if ( ! empty( $settings['bypass_face_scan'] ) ) {
+			// CRITICAL: Even in bypass mode, we MUST verify database string integrity on every interval.
+			$reference = BG_Enrollment::get_reference_portrait( $user_id );
+			if ( is_wp_error( $reference ) && 'bg_tampered_reference' === $reference->get_error_code() ) {
+				$page_title = 'CRITICAL: Database String Integrity Failure';
+				$page_url   = (string) $request->get_param( 'page_url' );
+				BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
+				
+				update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
+				$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+				update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+				
+				BG_Session::lock_tampered_account( $user_id );
+				
+				$admin_email = get_option('admin_email');
+				$user_info = get_userdata( $user_id );
+				$email_body = sprintf(
+					"Database tampering event intercepted on user account ID %d (%s).",
+					$user_id,
+					$user_info->user_email
+				);
+				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+				
+				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
+				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+			}
+
+			BG_Session::mark_verified( $user_id );
+			$page_title = (string) $request->get_param( 'page_title' );
+			$page_url   = (string) $request->get_param( 'page_url' );
+			BG_Logs::insert( $user_id, 'BYPASS', $page_title, $page_url, 100.0 );
+
+			return new WP_REST_Response(
+				array(
+					'bypass'               => true,
+					'seconds_until_rescan' => self::seconds_until_rescan( $user_id ),
+				),
+				200
+			);
+		}
+
 		$ticket = BG_Crypto::random_token( 32 );
 		set_transient( self::TICKET_TRANSIENT_PREFIX . $user_id, $ticket, self::TICKET_TTL_SECONDS );
 
@@ -190,6 +232,30 @@ class BG_Rest_Controller {
 		$result = BG_Verification::verify_against_reference( $user_id, $frame );
 
 		if ( is_wp_error( $result ) ) {
+			if ( 'bg_tampered_reference' === $result->get_error_code() ) {
+				$page_title = 'CRITICAL: Database String Integrity Failure';
+				$page_url   = (string) $request->get_param( 'page_url' );
+				BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
+				
+				update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
+				$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+				update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+				
+				BG_Session::lock_tampered_account( $user_id );
+				
+				$admin_email = get_option('admin_email');
+				$user_info = get_userdata( $user_id );
+				$email_body = sprintf(
+					"Database tampering event intercepted on user account ID %d (%s).",
+					$user_id,
+					$user_info->user_email
+				);
+				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+				
+				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
+				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+			}
+
 			if ( 'bg_cloud_timeout' === $result->get_error_code() ) {
 				// Spec #5: a definitive FACEIO-side timeout/5xx bypasses one interval loop only —
 				// never a local network drop, which is handled entirely client-side and never
@@ -199,8 +265,8 @@ class BG_Rest_Controller {
 				return new WP_REST_Response( array( 'status' => 'cloud_bypass' ), 200 );
 			}
 
-			self::log( $user_id, 'failure', $request, null );
-			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 401 ) );
+			self::log( $user_id, 'failure', $request );
+			return new WP_Error( 'bg_verification_failed', $result->get_error_message(), array( 'status' => 403 ) );
 		}
 
 		if ( ! $result['pass'] ) {
@@ -208,7 +274,7 @@ class BG_Rest_Controller {
 			return new WP_Error(
 				'bg_no_match',
 				__( 'The live scan did not match the enrolled identity.', 'biometric-gate' ),
-				array( 'status' => 401 )
+				array( 'status' => 403 )
 			);
 		}
 
@@ -248,6 +314,30 @@ class BG_Rest_Controller {
 	public static function kill_switch( WP_REST_Request $request ) {
 		$user_id = get_current_user_id();
 		$reason  = (string) $request->get_param( 'reason' );
+
+		if ( 'overlay_tampered' === $reason ) {
+			$page_title = 'CRITICAL: Element Deletion Detected';
+			$page_url   = (string) $request->get_param( 'page_url' );
+			BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
+			
+			update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
+			$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+			update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+			
+			BG_Session::lock_tampered_account( $user_id );
+			
+			$admin_email = get_option('admin_email');
+			$user_info = get_userdata( $user_id );
+			$email_body = sprintf(
+				"Element Deletion (DOM Tampering) event intercepted on user account ID %d (%s).",
+				$user_id,
+				$user_info->user_email
+			);
+			wp_mail( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
+			
+			$redirect_url = BG_Settings::get()['tampered_redirect_url'];
+			return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+		}
 
 		self::log( $user_id, 'failure', $request );
 		BG_Session::clear( $user_id );

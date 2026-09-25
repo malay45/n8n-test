@@ -107,7 +107,8 @@ class BG_Session {
 	 * @return bool Whether tampering with the encrypted token was previously detected.
 	 */
 	public static function is_locked( $user_id ) {
-		return (bool) get_user_meta( absint( $user_id ), 'bg_account_locked', true );
+		$user_id = absint( $user_id );
+		return (bool) get_user_meta( $user_id, 'bg_account_locked', true ) || (bool) get_user_meta( $user_id, 'locked_tampered', true );
 	}
 
 	/**
@@ -122,10 +123,22 @@ class BG_Session {
 		self::clear( $user_id );
 	}
 
+	public static function lock_tampered_account( $user_id ) {
+		$user_id = absint( $user_id );
+		update_user_meta( $user_id, 'locked_tampered', current_time('mysql', true) );
+		self::clear( $user_id );
+		wp_logout();
+	}
+
 	/**
 	 * @param int $user_id
 	 */
 	public static function unlock_account( $user_id ) {
+		delete_user_meta( absint( $user_id ), 'bg_account_locked' );
+	}
+
+	public static function unlock_tampered_account( $user_id ) {
+		delete_user_meta( absint( $user_id ), 'locked_tampered' );
 		delete_user_meta( absint( $user_id ), 'bg_account_locked' );
 	}
 

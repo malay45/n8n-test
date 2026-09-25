@@ -33,10 +33,12 @@ class BG_Settings {
 			// below — this is specifically "ran out of retries on a genuine non-match").
 			'fail_action'         => 'logout', // 'logout' | 'redirect'
 			'fail_redirect_url'   => '',
+			'tampered_redirect_url' => home_url(),
 
 			// The "Close" escape-hatch button's Continue destination (spec: lets a stuck user
 			// leave gracefully without granting access — never a bypass into protected content).
 			'close_button_redirect_url' => '',
+			'close_confirm_message'     => __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' ),
 
 			// Per-violation-type anti-cheat toggles. devtools defaults OFF since window-size-based
 			// detection is a best-effort heuristic (see bg-gate.js) with real false-positive risk.
@@ -46,6 +48,8 @@ class BG_Settings {
 			// (deny-by-default content guard is), just friction against casual snooping.
 			'block_devtools_shortcuts' => false,
 			'blocked_keys_custom'      => '',
+			'force_native_ios'         => false,
+			'bypass_face_scan'         => false,
 		);
 	}
 
@@ -139,7 +143,7 @@ class BG_Settings {
 			? sanitize_textarea_field( wp_unslash( $input['path_rules'] ) )
 			: '';
 
-		$allowed_retention = array( '30', '90', '180', '365', 'forever' );
+		$allowed_retention = array( '1', '7', '30', '90', '180', '365', 'forever' );
 		$clean['retention'] = ( isset( $input['retention'] ) && in_array( $input['retention'], $allowed_retention, true ) )
 			? $input['retention']
 			: '90';
@@ -179,9 +183,17 @@ class BG_Settings {
 			? esc_url_raw( wp_unslash( $input['fail_redirect_url'] ) )
 			: '';
 
+		$clean['tampered_redirect_url'] = ! empty( $input['tampered_redirect_url'] )
+			? esc_url_raw( wp_unslash( $input['tampered_redirect_url'] ) )
+			: home_url();
+
 		$clean['close_button_redirect_url'] = isset( $input['close_button_redirect_url'] )
 			? esc_url_raw( wp_unslash( $input['close_button_redirect_url'] ) )
 			: '';
+
+		$clean['close_confirm_message'] = isset( $input['close_confirm_message'] ) && '' !== trim( $input['close_confirm_message'] )
+			? sanitize_textarea_field( wp_unslash( $input['close_confirm_message'] ) )
+			: __( 'This action will redirect you away from your current lesson course page. Do you want to continue?', 'biometric-gate' );
 
 		$clean['kill_switches'] = self::sanitize_kill_switches(
 			isset( $input['kill_switches'] ) && is_array( $input['kill_switches'] ) ? $input['kill_switches'] : array()
@@ -191,6 +203,8 @@ class BG_Settings {
 		$clean['blocked_keys_custom'] = isset( $input['blocked_keys_custom'] )
 			? sanitize_text_field( wp_unslash( $input['blocked_keys_custom'] ) )
 			: '';
+		$clean['force_native_ios'] = ! empty( $input['force_native_ios'] );
+		$clean['bypass_face_scan'] = ! empty( $input['bypass_face_scan'] );
 
 		return $clean;
 	}
