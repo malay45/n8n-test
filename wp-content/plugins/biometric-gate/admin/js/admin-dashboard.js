@@ -316,23 +316,36 @@
 
 	var logsState = {
 		search: "",
-		user_id: cfg.initialUserId || 0,
+		user_id: parseInt(cfg.initialUserId, 10) || 0,
 		orderby: "time",
 		order: "DESC",
 		page: 1,
 	};
 
+	function getWipeLabel() {
+		if (logsState.user_id) {
+			return "Export &amp; Wipe This Student’s Log";
+		} else if (logsState.search && logsState.search.trim() !== "") {
+			return "Export &amp; Wipe Searched Logs";
+		}
+		return "Export &amp; Wipe Everyone’s Log";
+	}
+
 	function renderLogsTab() {
-		var wipeLabel = logsState.user_id
-			? "Export &amp; Wipe This Student's Logs"
-			: "Export &amp; Wipe Live Logs";
+		var wipeLabel = getWipeLabel();
+
+		var searchOptions = '<option value="">Search by user name or email…</option>';
+		var initialId = parseInt(cfg.initialUserId, 10) || 0;
+		if (initialId && cfg.initialUserName) {
+			searchOptions += '<option value="' + initialId + '" selected="selected">' + cfg.initialUserName + '</option>';
+		}
 
 		root.innerHTML =
 			'<div class="bg-admin-toolbar">' +
-			'<input type="search" id="bg-log-search" placeholder="Search by user name…" class="regular-text">' +
-			'<button type="button" class="button" id="bg-log-sort-toggle"></button>' +
+			'<select id="bg-log-search" style="min-width: 300px; display: inline-block; vertical-align: top;">' + searchOptions + '</select>' +
+			'<button type="button" class="button" id="bg-log-sort-toggle" style="margin-left:10px;"></button>' +
 			(logsState.user_id
-				? '<button type="button" class="button" id="bg-log-clear-filter">Clear User Filter</button>'
+				? '<button type="button" class="button" id="bg-log-clear-filter">Back to Master View (Show All)</button>'
 				: "") +
 			'<button type="button" class="button button-primary" id="bg-export-wipe">' + wipeLabel + '</button>' +
 			'<span id="bg-export-wipe-status"></span>' +
@@ -342,14 +355,52 @@
 			"<h2>Server Document Archive</h2>" +
 			'<table class="widefat striped"><thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead><tbody id="bg-backup-rows"></tbody></table>';
 
-		document.getElementById("bg-log-search").addEventListener(
-			"input",
-			debounce(function (e) {
-				logsState.search = e.target.value;
-				logsState.page = 1;
-				loadLogs();
-			}, 300),
-		);
+		if (window.jQuery && window.jQuery.fn.select2) {
+			window.jQuery("#bg-log-search").select2({
+				placeholder: "Search by user name or email…",
+				allowClear: true,
+				minimumInputLength: 1,
+				ajax: {
+					url: cfg.restUrl + "/admin/users",
+					dataType: "json",
+					delay: 250,
+					beforeSend: function (xhr) {
+						xhr.setRequestHeader("X-WP-Nonce", cfg.nonce);
+					},
+					data: function (params) {
+						return { search: params.term };
+					},
+					processResults: function (data) {
+						return {
+							results: data.map(function(u) {
+								return { id: u.id, text: u.name + " (" + u.email + ")" };
+							})
+						};
+					}
+				}
+			}).on("select2:select", function (e) {
+				var data = e.params.data;
+				if (data.id) {
+					window.location.href = cfg.logsTabUrl + "&user_id=" + data.id;
+				}
+			}).on("select2:unselect", function (e) {
+				window.location.href = cfg.logsTabUrl;
+			});
+		} else {
+			// Fallback if Select2 fails to load
+			document.getElementById("bg-log-search").addEventListener(
+				"change",
+				function (e) {
+					logsState.search = e.target.value;
+					logsState.page = 1;
+					var exportBtn = document.getElementById("bg-export-wipe");
+					if (exportBtn) {
+						exportBtn.innerHTML = getWipeLabel();
+					}
+					loadLogs();
+				}
+			);
+		}
 
 		var sortBtn = document.getElementById("bg-log-sort-toggle");
 		updateSortButtonLabel(sortBtn);
@@ -531,7 +582,7 @@
 			var tr = document.createElement("tr");
 			tr.appendChild(td(f.name));
 			tr.appendChild(td(humanSize(f.size)));
-			tr.appendChild(td(new Date(f.modified * 1000).toLocaleString()));
+			tr.appendChild(td(f.modified_formatted || new Date(f.modified * 1000).toLocaleString()));
 
 			var actionsTd = document.createElement("td");
 			var dl = document.createElement("a");

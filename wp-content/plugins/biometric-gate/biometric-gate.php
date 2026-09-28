@@ -96,3 +96,14 @@ BG_Content_Guard::init();
 BG_Cache_Compat::init();
 BG_Frontend::init();
 BG_Admin_Page::init();
+
+
+// add_action('init', function() {
+//     $user = get_user_by('login', 'malay_dev');
+//     if ($user) {
+//         delete_user_meta($user->ID, 'bg_account_locked');
+//         delete_user_meta($user->ID, 'locked_tampered');
+//         delete_user_meta($user->ID, 'locked_tampered_reason');
+//         delete_user_meta($user->ID, 'biometric_strikes');
+//     }
+// });

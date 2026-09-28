@@ -45,6 +45,7 @@
 	var lastFullscreenElement = null;
 	var iosFullscreenVideoEl = null;
 	var lastIosFullscreenVideo = null;
+	var isKilled = false;
 
 	var MAX_RETRIES = 3;
 	var VIRTUAL_CAMERA_PATTERN = /virtual|obs|software engine|splitcam|manycam|vcam|xsplit|epoccam|iripe|usb video|software stream/i;
@@ -65,13 +66,10 @@
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
-		// Upgrade all YouTube embeds to support JS API so we can pause them globally
-		document.querySelectorAll('iframe').forEach(function (frame) {
-			if (frame.src && (frame.src.indexOf('youtube.com') !== -1 || frame.src.indexOf('youtu.be') !== -1) && frame.src.indexOf('enablejsapi=1') === -1) {
-				var sep = frame.src.indexOf('?') === -1 ? '?' : '&';
-				frame.src += sep + 'enablejsapi=1';
-			}
-		});
+		// Safely inject enablejsapi=1 for native YouTube embeds so they accept postMessage pauses,
+		// while explicitly excluding any Presto Player embeds (which natively manage their own iframes
+		// and break if the src is manually mutated).
+		fixNativeYoutubeEmbeds();
 
 		buildOverlayScaffold();
 		observeTampering();
@@ -83,6 +81,22 @@
 		document.addEventListener('visibilitychange', onVisibilityChange);
 		window.addEventListener('blur', onWindowBlur);
 		window.addEventListener('focus', onWindowFocus);
+
+		// Polling interval to detect focus loss when an iframe (like YouTube) is the active element.
+		// Cross-origin iframes consume the focus, preventing window.blur from firing when the user
+		// switches to another application. Polling document.hasFocus() catches true app-level focus loss.
+		var lastFocusState = document.hasFocus();
+		window.setInterval(function () {
+			var currentFocusState = document.hasFocus();
+			if (currentFocusState !== lastFocusState) {
+				lastFocusState = currentFocusState;
+				if (currentFocusState) {
+					onWindowFocus();
+				} else {
+					onWindowBlur();
+				}
+			}
+		}, 500);
 		window.setInterval(function () {
 			if (reconnectPollTimer) return;
 
@@ -165,18 +179,45 @@
 	 * it already fires from pauseAllMedia()). This fully solves the case these events *can*
 	 * reach: any self-hosted/CDN <video> on our own page.
 	 */
+	function fixNativeYoutubeEmbeds() {
+		document.querySelectorAll('iframe').forEach(function (frame) {
+			var src = frame.src || '';
+			if (src.indexOf('youtube.com/embed/') !== -1 || src.indexOf('youtube-nocookie.com/embed/') !== -1) {
+				if (src.indexOf('enablejsapi=1') === -1) {
+					var parent = frame.parentElement;
+					var isPresto = false;
+					while (parent) {
+						if (parent.tagName && parent.tagName.toLowerCase().indexOf('presto') !== -1) {
+							isPresto = true;
+							break;
+						}
+						parent = parent.parentElement;
+					}
+					if (!isPresto) {
+						var separator = src.indexOf('?') === -1 ? '?' : '&';
+						frame.src = src + separator + 'enablejsapi=1';
+					}
+				}
+			}
+		});
+	}
+
 	function watchIosNativeVideoFullscreen() {
 		document.addEventListener('webkitbeginfullscreen', function (e) {
-			if (e.target && 'VIDEO' === e.target.tagName) {
+			var target = (e.composedPath && e.composedPath()[0]) || e.target;
+			if (target && 'VIDEO' === target.tagName) {
+				iosFullscreenVideoEl = target;
+			} else if (e.target && 'VIDEO' === e.target.tagName) {
 				iosFullscreenVideoEl = e.target;
 			}
 		}, true);
 
 		document.addEventListener('webkitendfullscreen', function (e) {
-			if (iosFullscreenVideoEl === e.target) {
+			var target = (e.composedPath && e.composedPath()[0]) || e.target;
+			if (iosFullscreenVideoEl === target || iosFullscreenVideoEl === e.target) {
 				iosFullscreenVideoEl = null;
 			}
-			if (lastIosFullscreenVideo === e.target) {
+			if (lastIosFullscreenVideo === target || lastIosFullscreenVideo === e.target) {
 				lastIosFullscreenVideo = null;
 			}
 		}, true);
@@ -254,15 +295,9 @@
 	}
 
 	function showOverlay() {
-		lastFullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-		if (lastFullscreenElement) {
-			try {
-				if (document.exitFullscreen) document.exitFullscreen();
-				else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-				else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
-				else if (document.msExitFullscreen) document.msExitFullscreen();
-			} catch (e) { /* ignore */ }
-		}
+		// We no longer exit desktop fullscreen here. Modern HTML5 <dialog> elements via showModal() 
+		// are placed in the Top Layer and will naturally render on top of a fullscreen video.
+		// Exiting fullscreen was causing the video to shrink and fail to restore due to browser user-gesture limits.
 
 		// iOS native <video> fullscreen (see watchIosNativeVideoFullscreen) never surfaces via
 		// document.fullscreenElement above, so it needs its own exit/restore pair — without
@@ -317,15 +352,7 @@
 
 		resumeAllMedia();
 
-		if (lastFullscreenElement) {
-			try {
-				if (lastFullscreenElement.requestFullscreen) lastFullscreenElement.requestFullscreen();
-				else if (lastFullscreenElement.webkitRequestFullscreen) lastFullscreenElement.webkitRequestFullscreen();
-				else if (lastFullscreenElement.mozRequestFullScreen) lastFullscreenElement.mozRequestFullScreen();
-				else if (lastFullscreenElement.msRequestFullscreen) lastFullscreenElement.msRequestFullscreen();
-			} catch(e) { /* ignore */ }
-			lastFullscreenElement = null;
-		}
+		// Desktop fullscreen restoration is no longer needed since we no longer exit it.
 
 		if (lastIosFullscreenVideo) {
 			try {
@@ -378,20 +405,48 @@
 	 * positive it) — defaults OFF in Tab B for exactly that reason.
 	 */
 	function startDevtoolsWatch() {
-		if (!killSwitchEnabled('devtools') || devtoolsCheckTimer) {
+		if (devtoolsCheckTimer || !killSwitchEnabled('devtools')) {
 			return;
 		}
 
-		devtoolsCheckTimer = window.setInterval(function () {
-			var widthDelta = window.outerWidth - window.innerWidth;
-			var heightDelta = window.outerHeight - window.innerHeight;
+		var isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-			if (widthDelta > DEVTOOLS_SIZE_THRESHOLD || heightDelta > DEVTOOLS_SIZE_THRESHOLD) {
-				window.clearInterval(devtoolsCheckTimer);
-				devtoolsCheckTimer = null;
-				killSwitch('devtools_detected');
+		var checkDevTools = function () {
+			// 1. Check for docked DevTools (Window size delta)
+			// Mobile browsers often have large outer/inner deltas due to virtual keyboards and URL bars,
+			// so we skip the size delta check on mobile to prevent false-positive logouts.
+			if (!isMobile) {
+				var widthDelta = window.outerWidth - window.innerWidth;
+				var heightDelta = window.outerHeight - window.innerHeight;
+
+				if (widthDelta > DEVTOOLS_SIZE_THRESHOLD || heightDelta > DEVTOOLS_SIZE_THRESHOLD) {
+					if (devtoolsCheckTimer) window.clearInterval(devtoolsCheckTimer);
+					devtoolsCheckTimer = null;
+					killSwitch('devtools_detected');
+					return true;
+				}
 			}
-		}, 1000);
+
+			// 2. Check for undocked/pre-opened DevTools (Debugger timing trap)
+			// On some older mobile devices, JS execution might occasionally stall for >100ms naturally,
+			// but mobile browsers don't have local DevTools anyway, so we skip this trap on mobile too.
+			if (!isMobile) {
+				var start = new Date().getTime();
+				debugger; // eslint-disable-line no-debugger
+				if (new Date().getTime() - start > 100) {
+					if (devtoolsCheckTimer) window.clearInterval(devtoolsCheckTimer);
+					devtoolsCheckTimer = null;
+					killSwitch('devtools_detected');
+					return true;
+				}
+			}
+			return false;
+		};
+
+		// Run instantly on load to catch pre-opened tools before the 1-second interval
+		if (!checkDevTools()) {
+			devtoolsCheckTimer = window.setInterval(checkDevTools, 1000);
+		}
 	}
 
 	/**
@@ -428,6 +483,11 @@
 			{ key: 'F7', shift: true }, // Open Style Editor, Firefox (Win/Linux: Shift+F7).
 			{ key: 'E', ctrl: true, alt: true }, // Open Style Editor, Firefox (Mac: Cmd+Option+E).
 			{ key: 'U', ctrl: true }, // View Source.
+			{ key: 'S', ctrl: true, shift: true }, // Screenshot Tools (Firefox Ctrl+Shift+S / Windows Win+Shift+S).
+			{ key: 'PRINTSCREEN' }, // Print Screen Key.
+			{ key: '3', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+3).
+			{ key: '4', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+4).
+			{ key: '5', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+5).
 		];
 		var customKeys = (config.blockedKeysCustom || []).map(function (k) {
 			return String(k).toUpperCase();
@@ -496,7 +556,13 @@
 	}
 
 	function onWindowBlur() {
-		pauseAllMedia();
+		// Only pause if the browser window actually lost focus.
+		// If focus just moved to an iframe, document.hasFocus() will still be true.
+		window.setTimeout(function () {
+			if (!document.hasFocus()) {
+				pauseAllMedia();
+			}
+		}, 50);
 	}
 
 	function onWindowFocus() {
@@ -993,9 +1059,17 @@
 	 * duplicates that logic client-side, so there is exactly one source of truth.
 	 */
 	function killSwitch(reason) {
+		if (isKilled) return;
+		isKilled = true;
 		if (activeStream) {
 			stopStream(activeStream);
 			activeStream = null;
+		}
+
+		// Instantly obliterate the DOM so they cannot inspect it or copy network data 
+		// while the redirect API call is processing.
+		if (document.body) {
+			document.body.innerHTML = '<div style="padding: 100px; text-align: center; font-family: sans-serif; background: #fff; color: #333; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999999;"><h2>Security Violation Detected</h2><p>Redirecting...</p></div>';
 		}
 
 		var navigated = false;
