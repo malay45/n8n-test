@@ -35,6 +35,18 @@ class BG_Logs
 	 * @param string|null $format    PHP date format; defaults to the site's date + time format.
 	 * @return string
 	 */
+	public static function delete_user_logs($user_id)
+	{
+		global $wpdb;
+
+		$user_id = absint($user_id);
+		if ($user_id < 1) {
+			return false; // Never allow this path to touch other students' rows.
+		}
+
+		return $wpdb->delete(BG_Activator::table_name(), array('user_id' => $user_id), array('%d'));
+	}
+
 	public static function format_local_time($gmt_mysql, $format = null)
 	{
 		if (empty($gmt_mysql)) {
