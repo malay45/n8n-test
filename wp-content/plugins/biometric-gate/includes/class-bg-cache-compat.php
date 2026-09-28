@@ -25,8 +25,18 @@ class BG_Cache_Compat {
 	 */
 	public static function no_store_rest_responses( $served, $result, $request ) {
 		if ( 0 === strpos( $request->get_route(), '/' . BG_REST_NAMESPACE ) && ! headers_sent() ) {
-			header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+			// Strip first: header()'s default replace-on-same-name only protects against a
+			// header *we* already sent this request — it does nothing against one some other
+			// plugin or drop-in queued before this filter ran (client QA: a stale 30-day
+			// Cache-Control was still reaching the browser on /session/status here).
+			header_remove( 'Cache-Control' );
+			header_remove( 'Pragma' );
+			header_remove( 'Expires' );
+			header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0' );
 			header( 'Pragma: no-cache' );
+			header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT' );
+			header( 'X-Accel-Expires: 0' ); // Nginx proxy cache.
+			header( 'Surrogate-Control: no-store' ); // Varnish / CDN edge caches.
 		}
 		return $served;
 	}

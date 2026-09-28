@@ -40,6 +40,8 @@
 	var reconnectPollTimer = null;
 	var mediaRescanTimer = null;
 	var devtoolsCheckTimer = null;
+	var focusPollTimer = null;
+	var statusHeartbeatTimer = null;
 	var pausedMedia = [];
 	var activeStream = null;
 	var lastFullscreenElement = null;
@@ -66,11 +68,6 @@
 	document.addEventListener('DOMContentLoaded', init);
 
 	function init() {
-		// Safely inject enablejsapi=1 for native YouTube embeds so they accept postMessage pauses,
-		// while explicitly excluding any Presto Player embeds (which natively manage their own iframes
-		// and break if the src is manually mutated).
-		fixNativeYoutubeEmbeds();
-
 		buildOverlayScaffold();
 		observeTampering();
 		setupInputBlocking();
@@ -86,7 +83,7 @@
 		// Cross-origin iframes consume the focus, preventing window.blur from firing when the user
 		// switches to another application. Polling document.hasFocus() catches true app-level focus loss.
 		var lastFocusState = document.hasFocus();
-		window.setInterval(function () {
+		focusPollTimer = window.setInterval(function () {
 			var currentFocusState = document.hasFocus();
 			if (currentFocusState !== lastFocusState) {
 				lastFocusState = currentFocusState;
@@ -97,47 +94,82 @@
 				}
 			}
 		}, 500);
-		window.setInterval(function () {
-			if (reconnectPollTimer) return;
 
-			if (!navigator.onLine) {
-				showConnectionLost();
-				return;
-			}
+		startStatusHeartbeat();
+		runScanCycle();
 
-			// Unique query string per tick so no browser/Varnish/Breeze cache can ever answer
-			// this heartbeat from a stored copy, even before server exclude rules are in place.
-			var statusUrl = config.restUrl + '/session/status';
-			statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
-			fetch(statusUrl, {
-				method: 'GET',
-				headers: { 'X-WP-Nonce': config.nonce },
-				cache: 'no-store'
+		// Deferred, off the critical page-load path: mutating a YouTube iframe's src (to add
+		// enablejsapi=1) forces the browser to discard and reload that embed from scratch —
+		// i.e. exactly "when the video first starts rolling" per the client's QA report. Doing
+		// that in the same synchronous tick as runScanCycle()'s server call above meant the
+		// heaviest client-side work (a full iframe reload) and the security-critical /scan/start
+		// request were both competing for the browser's connection/CPU budget at once, which is
+		// what the first status/scan tick's multi-second lag traced back to. requestIdleCallback
+		// (falling back to a short setTimeout on Safari, which lacks it) lets the browser finish
+		// its initial render/network burst first.
+		var deferYoutubeFix = window.requestIdleCallback || function (cb) { window.setTimeout(cb, 300); };
+		deferYoutubeFix(fixNativeYoutubeEmbeds);
+	}
+
+	/**
+	 * (Re)starts the /session/status heartbeat from a clean 5-second phase. Called once at init,
+	 * and again after every scan resolves (see handleScanSuccess) — without that reset, this
+	 * interval's phase is whatever it happened to drift to since page load, and a tick could
+	 * land in the same instant as the heavy client-side work a scan's own completion triggers
+	 * (restoring fullscreen, resuming media, releasing the camera), which is what the client's
+	 * QA report described as "after each Face Scan, the issue keeps repeating itself".
+	 */
+	function startStatusHeartbeat() {
+		if (statusHeartbeatTimer) {
+			window.clearInterval(statusHeartbeatTimer);
+		}
+		statusHeartbeatTimer = window.setInterval(runStatusHeartbeatTick, 5000);
+	}
+
+	function runStatusHeartbeatTick() {
+		if (reconnectPollTimer) return;
+
+		// A scan is actively in progress (ticket minted, camera likely open, /scan/result about
+		// to be posted) — skip this tick rather than adding a redundant concurrent request right
+		// when the security-critical scan traffic needs the server's attention most.
+		if (overlayEl && overlayEl.open) return;
+
+		if (!navigator.onLine) {
+			showConnectionLost();
+			return;
+		}
+
+		// Unique query string per tick so no browser/Varnish/Breeze cache can ever answer
+		// this heartbeat from a stored copy, even before server exclude rules are in place.
+		var statusUrl = config.restUrl + '/session/status';
+		statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
+		fetch(statusUrl, {
+			method: 'GET',
+			headers: { 'X-WP-Nonce': config.nonce },
+			cache: 'no-store'
+		})
+			.then(function (res) {
+				// Only treat actual network drops as a disconnect, not 403/401 errors.
+				if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
+					throw new Error('Network down');
+				}
+				return res.text();
 			})
-				.then(function (res) {
-					// Only treat actual network drops as a disconnect, not 403/401 errors.
-					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
-						throw new Error('Network down');
-					}
-					return res.text();
-				})
-				.then(function (text) {
-					// Raw data text string parsed: valid|bypass|locked
-					if (text && text.indexOf('|') !== -1) {
-						var parts = text.split('|');
-						if (parts[2] === '1') {
-							// If account became locked in background
-							if (!isBlockingShell && !overlayEl.open) {
-								window.location.reload();
-							}
+			.then(function (text) {
+				// Raw data text string parsed: valid|bypass|locked
+				if (text && text.indexOf('|') !== -1) {
+					var parts = text.split('|');
+					if (parts[2] === '1') {
+						// If account became locked in background
+						if (!isBlockingShell && !overlayEl.open) {
+							window.location.reload();
 						}
 					}
-				})
-				.catch(function () {
-					if (!reconnectPollTimer) showConnectionLost();
-				});
-		}, 5000);
-		runScanCycle();
+				}
+			})
+			.catch(function () {
+				if (!reconnectPollTimer) showConnectionLost();
+			});
 	}
 
 	function killSwitchEnabled(type) {
@@ -972,6 +1004,10 @@
 
 		retryCount = 0;
 		hideOverlay();
+
+		// Fresh 5-second phase, not whatever point the interval happened to have drifted to —
+		// see startStatusHeartbeat()'s docblock for why this matters right after a scan.
+		startStatusHeartbeat();
 
 		if (isBlockingShell) {
 			window.location.reload();
