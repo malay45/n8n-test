@@ -351,7 +351,7 @@
 			'<select id="bg-log-search" style="min-width: 300px; display: inline-block; vertical-align: top;">' + searchOptions + '</select>' +
 			'<button type="button" class="button" id="bg-log-sort-toggle" style="margin-left:10px;"></button>' +
 			(logsState.user_id
-				? '<button type="button" class="button" id="bg-log-clear-filter">Back to Master View (Show All)</button>'
+				? '<button type="button" class="button" id="bg-log-clear-filter">Clear User Filter (Delete This Student’s Logs)</button>'
 				: "") +
 			'<button type="button" class="button button-primary" id="bg-export-wipe">' + wipeLabel + '</button>' +
 			'<span id="bg-export-wipe-status"></span>' +
@@ -431,10 +431,22 @@
 		var clearBtn = document.getElementById("bg-log-clear-filter");
 		if (clearBtn) {
 			clearBtn.addEventListener("click", function () {
-				if (!window.confirm(cfg.i18n.confirmClearFilter || "Clear the user filter and return to the full audit log?")) {
+				if (!window.confirm(cfg.i18n.confirmClearFilter)) {
 					return;
 				}
-				window.location.href = cfg.logsTabUrl;
+				var status = document.getElementById("bg-export-wipe-status");
+				clearBtn.disabled = true;
+				apiFetch("/admin/clear-user-logs", {
+					method: "POST",
+					body: { user_id: logsState.user_id },
+				})
+					.then(function () {
+						window.location.href = cfg.logsTabUrl;
+					})
+					.catch(function (err) {
+						clearBtn.disabled = false;
+						status.textContent = (err && err.message) || "Could not delete this student's logs.";
+					});
 			});
 		}
 

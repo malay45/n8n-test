@@ -25,6 +25,7 @@ class BG_Admin_Rest_Controller {
 			array( 'POST', '/admin/settings', 'save_settings' ),
 			array( 'GET', '/admin/logs', 'list_logs' ),
 			array( 'POST', '/admin/export-wipe', 'export_and_wipe' ),
+			array( 'POST', '/admin/clear-user-logs', 'clear_user_logs' ),
 			array( 'POST', '/admin/export-user', 'export_user' ),
 			array( 'GET', '/admin/export-progress', 'export_progress' ),
 			array( 'GET', '/admin/backups', 'list_backups' ),
@@ -196,6 +197,25 @@ class BG_Admin_Rest_Controller {
 				BG_Logs::run_export_and_wipe( $user_id, $progress_key );
 			}
 		);
+	}
+
+	/**
+	 * Tab C's "Clear User Filter": permanently deletes the filtered student's log rows (no CSV
+	 * backup — Export & Wipe is the backed-up path) and requires a specific user, so it can
+	 * never erase everyone's logs.
+	 */
+	public static function clear_user_logs( WP_REST_Request $request ) {
+		$user_id = absint( $request->get_param( 'user_id' ) );
+		if ( $user_id < 1 ) {
+			return new WP_Error( 'bg_missing_user', __( 'A student must be selected before their logs can be cleared.', 'biometric-gate' ), array( 'status' => 400 ) );
+		}
+
+		$deleted = BG_Logs::delete_user_logs( $user_id );
+		if ( false === $deleted ) {
+			return new WP_Error( 'bg_delete_failed', __( 'The logs could not be deleted.', 'biometric-gate' ), array( 'status' => 500 ) );
+		}
+
+		return new WP_REST_Response( array( 'status' => 'deleted', 'deleted' => (int) $deleted ), 200 );
 	}
 
 	public static function export_user( WP_REST_Request $request ) {

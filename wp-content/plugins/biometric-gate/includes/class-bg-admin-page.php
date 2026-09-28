@@ -149,7 +149,7 @@ class BG_Admin_Page {
 					'i18n'            => array(
 						'confirmReset'      => __( 'Reset this student\'s biometric enrollment? They will need to be re-enrolled before they can access protected pages again.', 'biometric-gate' ),
 						'confirmExportWipe' => __( 'This will export every log row to a CSV backup, then permanently erase the live log table. Continue?', 'biometric-gate' ),
-						'confirmClearFilter' => __( 'Return to the Master View to see everyone\'s logs? (Note: This does not erase any data)', 'biometric-gate' ),
+						'confirmClearFilter' => __( 'This will PERMANENTLY delete all of this student\'s logs from the database. No CSV backup is made (use Export & Wipe if you need one). This cannot be undone. Continue?', 'biometric-gate' ),
 						'confirmDeleteFile' => __( 'Permanently delete this backup file from the server?', 'biometric-gate' ),
 						'idTokenLoaded'     => __( 'ID Token Loaded', 'biometric-gate' ),
 						'idMissing'         => __( 'ID Missing', 'biometric-gate' ),
