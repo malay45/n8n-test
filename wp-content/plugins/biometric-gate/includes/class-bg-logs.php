@@ -28,6 +28,26 @@ class BG_Logs
 	}
 
 	/**
+	 * Every log timestamp is stored in UTC; this renders one in the site timezone from
+	 * Settings -> General -> Timezone, so all admin views and exports agree with each other.
+	 *
+	 * @param string      $gmt_mysql UTC 'Y-m-d H:i:s' value.
+	 * @param string|null $format    PHP date format; defaults to the site's date + time format.
+	 * @return string
+	 */
+	public static function format_local_time($gmt_mysql, $format = null)
+	{
+		if (empty($gmt_mysql)) {
+			return '';
+		}
+		if (null === $format) {
+			$format = get_option('date_format') . ' ' . get_option('time_format');
+		}
+		$timestamp = strtotime($gmt_mysql . ' UTC');
+		return false === $timestamp ? (string) $gmt_mysql : wp_date($format, $timestamp);
+	}
+
+	/**
 	 * Record one scan event. Called from the REST controller only, after the server has
 	 * independently confirmed the result — never from client-supplied "status: success" input.
 	 *
@@ -162,7 +182,7 @@ class BG_Logs
 			return 0;
 		}
 
-		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
+		fputcsv($handle, array('Timestamp (' . wp_timezone_string() . ')', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
 
 		$last_id  = 0;
 		$written  = 0;
@@ -204,7 +224,7 @@ class BG_Logs
 				fputcsv(
 					$handle,
 					array(
-						$row['created_at'],
+						self::format_local_time($row['created_at'], 'Y-m-d H:i:s'),
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
@@ -239,7 +259,7 @@ class BG_Logs
 
 	private static function backup_filepath($prefix)
 	{
-		$filename = sprintf('%s-%s.csv', sanitize_file_name($prefix), gmdate('Y-m-d-His'));
+		$filename = sprintf('%s-%s.csv', sanitize_file_name($prefix), wp_date('Y-m-d-His'));
 		return trailingslashit(BG_BACKUP_DIR) . $filename;
 	}
 
@@ -372,7 +392,7 @@ class BG_Logs
 			return;
 		}
 
-		fputcsv($handle, array('Timestamp (UTC)', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
+		fputcsv($handle, array('Timestamp (' . wp_timezone_string() . ')', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
 
 		$last_id = 0;
 		do {
@@ -393,7 +413,7 @@ class BG_Logs
 				fputcsv(
 					$handle,
 					array(
-						$row['created_at'],
+						self::format_local_time($row['created_at'], 'Y-m-d H:i:s'),
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
