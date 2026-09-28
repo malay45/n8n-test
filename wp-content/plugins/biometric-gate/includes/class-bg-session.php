@@ -28,7 +28,10 @@ class BG_Session {
 		}
 
 		if ( self::is_locked( $user->ID ) ) {
-			return new WP_Error( 'bg_account_locked', __( 'Your profile is currently locked. Please contact support.', 'biometric-gate' ) );
+			return new WP_Error(
+				'bg_account_locked',
+				'<strong>' . __( 'ERROR', 'biometric-gate' ) . '</strong>: ' . __( 'Your account has been locked due to a security violation. Please contact support.', 'biometric-gate' )
+			);
 		}
 
 		return $user;

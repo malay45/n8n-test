@@ -105,10 +105,14 @@
 				return;
 			}
 
-			fetch(config.restUrl + '/session/status', {
+			// Unique query string per tick so no browser/Varnish/Breeze cache can ever answer
+			// this heartbeat from a stored copy, even before server exclude rules are in place.
+			var statusUrl = config.restUrl + '/session/status';
+			statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
+			fetch(statusUrl, {
 				method: 'GET',
 				headers: { 'X-WP-Nonce': config.nonce },
-				cache: 'no-cache'
+				cache: 'no-store'
 			})
 				.then(function (res) {
 					// Only treat actual network drops as a disconnect, not 403/401 errors.
@@ -470,24 +474,29 @@
 		// matcher only ever checked ctrl/shift and had no alt handling at all, so every Mac
 		// combo in the client's table silently failed to match. Each row below is listed once
 		// per platform so both fire correctly.
+		// Matched on e.code (the physical key), NOT e.key: on macOS, holding Option rewrites
+		// e.key into a special character (Option+I -> "ˆ", Option+J -> "∆", Option+C -> "ç",
+		// Option+K -> "˚", Option+E -> dead key), so every Cmd+Option combo silently failed to
+		// match when this compared e.key. ctrl matches Ctrl (Win/Linux) or Cmd (Mac).
 		var blockedCombos = [
-			{ key: 'F12' }, // Chrome/Edge DevTools (Win/Linux/Mac all use bare F12).
-			{ key: 'I', ctrl: true, shift: true }, // Open Elements Inspector (Win/Linux).
-			{ key: 'I', ctrl: true, alt: true }, // Open Elements Inspector (Mac: Cmd+Option+I).
-			{ key: 'J', ctrl: true, shift: true }, // Open Console Panel (Win/Linux).
-			{ key: 'J', ctrl: true, alt: true }, // Open Console Panel (Mac: Cmd+Option+J).
-			{ key: 'C', ctrl: true, shift: true }, // Target Element Selector (Win/Linux).
-			{ key: 'C', ctrl: true, alt: true }, // Target Element Selector (Mac: Cmd+Option+C).
-			{ key: 'K', ctrl: true, shift: true }, // Open Web Inspector, Firefox (Win/Linux).
-			{ key: 'K', ctrl: true, alt: true }, // Open Web Inspector, Firefox (Mac: Cmd+Option+K).
-			{ key: 'F7', shift: true }, // Open Style Editor, Firefox (Win/Linux: Shift+F7).
-			{ key: 'E', ctrl: true, alt: true }, // Open Style Editor, Firefox (Mac: Cmd+Option+E).
-			{ key: 'U', ctrl: true }, // View Source.
-			{ key: 'S', ctrl: true, shift: true }, // Screenshot Tools (Firefox Ctrl+Shift+S / Windows Win+Shift+S).
-			{ key: 'PRINTSCREEN' }, // Print Screen Key.
-			{ key: '3', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+3).
-			{ key: '4', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+4).
-			{ key: '5', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+5).
+			{ code: 'F12' }, // Chrome/Edge DevTools (Win/Linux/Mac all use bare F12).
+			{ code: 'KeyI', ctrl: true, shift: true }, // Open Elements Inspector (Win/Linux).
+			{ code: 'KeyI', ctrl: true, alt: true }, // Open Elements Inspector (Mac: Cmd+Option+I).
+			{ code: 'KeyJ', ctrl: true, shift: true }, // Open Console Panel (Win/Linux).
+			{ code: 'KeyJ', ctrl: true, alt: true }, // Open Console Panel (Mac: Cmd+Option+J).
+			{ code: 'KeyC', ctrl: true, shift: true }, // Target Element Selector (Win/Linux).
+			{ code: 'KeyC', ctrl: true, alt: true }, // Target Element Selector (Mac: Cmd+Option+C).
+			{ code: 'KeyK', ctrl: true, shift: true }, // Open Web Inspector, Firefox (Win/Linux).
+			{ code: 'KeyK', ctrl: true, alt: true }, // Open Web Inspector, Firefox (Mac: Cmd+Option+K).
+			{ code: 'F7', shift: true }, // Open Style Editor, Firefox (Win/Linux: Shift+F7).
+			{ code: 'KeyE', ctrl: true, alt: true }, // Open Style Editor, Firefox (Mac: Cmd+Option+E).
+			{ code: 'KeyU', ctrl: true }, // View Source (Win/Linux: Ctrl+U).
+			{ code: 'KeyU', ctrl: true, alt: true }, // View Source (Mac Chrome: Cmd+Option+U).
+			{ code: 'KeyS', ctrl: true, shift: true }, // Screenshot Tools (Firefox Ctrl+Shift+S).
+			{ code: 'PrintScreen' }, // Print Screen Key.
+			{ code: 'Digit3', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+3).
+			{ code: 'Digit4', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+4).
+			{ code: 'Digit5', ctrl: true, shift: true }, // Mac Screenshot (Cmd+Shift+5).
 		];
 		var customKeys = (config.blockedKeysCustom || []).map(function (k) {
 			return String(k).toUpperCase();
@@ -497,7 +506,7 @@
 			var key = (e.key || '').toUpperCase();
 
 			var comboMatch = blockedCombos.some(function (combo) {
-				if (combo.key.toUpperCase() !== key) {
+				if (combo.code !== e.code) {
 					return false;
 				}
 				// ctrl/cmd, shift, and alt/option are checked independently and must each match
@@ -517,8 +526,9 @@
 
 			if (comboMatch || customKeys.indexOf(key) !== -1) {
 				e.preventDefault();
+				e.stopPropagation();
 			}
-		});
+		}, true); // Capture phase, so page scripts that stop propagation can't swallow it first.
 	}
 
 	/**

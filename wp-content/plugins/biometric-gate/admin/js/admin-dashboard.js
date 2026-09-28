@@ -322,6 +322,12 @@
 		page: 1,
 	};
 
+	function escapeHtml(value) {
+		return String(value).replace(/[&<>"']/g, function (c) {
+			return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+		});
+	}
+
 	function getWipeLabel() {
 		if (logsState.user_id) {
 			return "Export &amp; Wipe This Student’s Log";
@@ -337,7 +343,7 @@
 		var searchOptions = '<option value="">Search by user name or email…</option>';
 		var initialId = parseInt(cfg.initialUserId, 10) || 0;
 		if (initialId && cfg.initialUserName) {
-			searchOptions += '<option value="' + initialId + '" selected="selected">' + cfg.initialUserName + '</option>';
+			searchOptions += '<option value="' + initialId + '" selected="selected">' + escapeHtml(cfg.initialUserName) + '</option>';
 		}
 
 		root.innerHTML =

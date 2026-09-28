@@ -217,6 +217,7 @@ class BG_Admin_Page {
 				'min_confidence_percent' => isset( $_POST['min_confidence_percent'] ) ? wp_unslash( $_POST['min_confidence_percent'] ) : '',
 				'fail_action'         => isset( $_POST['fail_action'] ) ? wp_unslash( $_POST['fail_action'] ) : 'logout',
 				'fail_redirect_url'   => isset( $_POST['fail_redirect_url'] ) ? wp_unslash( $_POST['fail_redirect_url'] ) : '',
+				'tampered_redirect_url' => isset( $_POST['tampered_redirect_url'] ) ? wp_unslash( $_POST['tampered_redirect_url'] ) : '',
 				'close_button_redirect_url' => ! empty( $_POST['close_button_redirect_url'] ) ? wp_unslash( $_POST['close_button_redirect_url'] ) : home_url(),
 				'close_confirm_message' => isset( $_POST['close_confirm_message'] ) ? wp_unslash( $_POST['close_confirm_message'] ) : '',
 				'kill_switches'       => isset( $_POST['kill_switches'] ) ? wp_unslash( $_POST['kill_switches'] ) : array(),
@@ -487,7 +488,7 @@ class BG_Admin_Page {
 								<td><?php echo esc_html( $u->display_name . ' (' . $u->user_email . ')' ); ?></td>
 								<td><?php
 									$timestamp = get_user_meta( $u->ID, 'locked_tampered', true );
-									echo esc_html( $timestamp );
+									echo esc_html( BG_Logs::format_local_time( $timestamp ) );
 								?></td>
 								<td><?php
 									$reason = get_user_meta( $u->ID, 'locked_tampered_reason', true );

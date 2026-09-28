@@ -30,6 +30,17 @@ if ( isset( $_SERVER['REQUEST_METHOD'] ) && $_SERVER['REQUEST_METHOD'] === 'GET'
 	}
 
 	if ( $bg_is_status ) {
+		// This intercept die()s before the REST server loads, so REST-level header filters
+		// never run for it — the zero-cache rule has to be sent right here, ahead of every
+		// response path below (200/401/403), or Varnish/Breeze/the browser may cache it.
+		header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
+		header( 'Pragma: no-cache', true );
+		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
+		header( 'X-Accel-Expires: 0', true ); // Nginx proxy cache.
+		header( 'Surrogate-Control: no-store', true ); // Varnish / CDN edge caches.
+		header_remove( 'Last-Modified' );
+		header_remove( 'ETag' );
+
 		// We need pluggable for auth checks
 		if ( ! function_exists( 'is_user_logged_in' ) ) {
 			require_once ABSPATH . WPINC . '/pluggable.php';
