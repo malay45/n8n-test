@@ -113,6 +113,9 @@ class BG_Admin_Page {
 			file_exists( $admin_css_path ) ? filemtime( $admin_css_path ) : BG_PLUGIN_VERSION
 		);
 
+		wp_enqueue_style( 'select2', 'https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css', array(), '4.0.13' );
+		wp_enqueue_script( 'select2', 'https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js', array('jquery'), '4.0.13', true );
+
 		if ( in_array( $tab, array( 'a', 'c' ), true ) ) {
 			wp_enqueue_script(
 				'bg-admin',
@@ -122,6 +125,15 @@ class BG_Admin_Page {
 				true
 			);
 
+			$initial_user_id = isset( $_GET['user_id'] ) ? absint( $_GET['user_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$initial_user_name = '';
+			if ( $initial_user_id > 0 ) {
+				$user = get_userdata( $initial_user_id );
+				if ( $user ) {
+					$initial_user_name = $user->display_name . ' (' . $user->user_email . ')';
+				}
+			}
+
 			wp_localize_script(
 				'bg-admin',
 				'BiometricGateAdmin',
@@ -129,14 +141,15 @@ class BG_Admin_Page {
 					'restUrl'         => esc_url_raw( rest_url( BG_REST_NAMESPACE ) ),
 					'nonce'           => wp_create_nonce( 'wp_rest' ),
 					'tab'             => $tab,
-					'initialUserId'   => isset( $_GET['user_id'] ) ? absint( $_GET['user_id'] ) : 0, // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					'initialUserId'   => $initial_user_id,
+					'initialUserName' => $initial_user_name,
 					'downloadBaseUrl' => admin_url( 'admin-post.php' ),
 					'downloadNonce'   => wp_create_nonce( 'bg_download_backup' ),
 					'logsTabUrl'      => admin_url( 'admin.php?page=' . self::MENU_SLUG . '&tab=c' ),
 					'i18n'            => array(
 						'confirmReset'      => __( 'Reset this student\'s biometric enrollment? They will need to be re-enrolled before they can access protected pages again.', 'biometric-gate' ),
 						'confirmExportWipe' => __( 'This will export every log row to a CSV backup, then permanently erase the live log table. Continue?', 'biometric-gate' ),
-						'confirmClearFilter' => __( 'Clear the user filter and return to the full audit log?', 'biometric-gate' ),
+						'confirmClearFilter' => __( 'Return to the Master View to see everyone\'s logs? (Note: This does not erase any data)', 'biometric-gate' ),
 						'confirmDeleteFile' => __( 'Permanently delete this backup file from the server?', 'biometric-gate' ),
 						'idTokenLoaded'     => __( 'ID Token Loaded', 'biometric-gate' ),
 						'idMissing'         => __( 'ID Missing', 'biometric-gate' ),

@@ -19,6 +19,19 @@ class BG_Session {
 
 	public static function init() {
 		add_action( 'wp_logout', array( __CLASS__, 'clear_current_user' ) );
+		add_filter( 'wp_authenticate_user', array( __CLASS__, 'prevent_locked_login' ), 10, 1 );
+	}
+
+	public static function prevent_locked_login( $user ) {
+		if ( is_wp_error( $user ) ) {
+			return $user;
+		}
+
+		if ( self::is_locked( $user->ID ) ) {
+			return new WP_Error( 'bg_account_locked', __( 'Your profile is currently locked. Please contact support.', 'biometric-gate' ) );
+		}
+
+		return $user;
 	}
 
 	private static function transient_key( $user_id ) {
@@ -138,8 +151,11 @@ class BG_Session {
 	}
 
 	public static function unlock_tampered_account( $user_id ) {
-		delete_user_meta( absint( $user_id ), 'locked_tampered' );
-		delete_user_meta( absint( $user_id ), 'bg_account_locked' );
+		$user_id = absint( $user_id );
+		delete_user_meta( $user_id, 'locked_tampered' );
+		delete_user_meta( $user_id, 'bg_account_locked' );
+		delete_user_meta( $user_id, 'locked_tampered_reason' );
+		delete_user_meta( $user_id, 'biometric_strikes' );
 	}
 
 	private static function threshold_seconds() {

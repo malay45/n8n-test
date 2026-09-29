@@ -176,6 +176,14 @@ class BG_Admin_Rest_Controller {
 			)
 		);
 
+		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
+		if ( ! empty( $result['rows'] ) ) {
+			foreach ( $result['rows'] as &$row ) {
+				$timestamp = strtotime( $row['created_at'] . ' UTC' );
+				$row['created_at'] = wp_date( $format, $timestamp );
+			}
+		}
+
 		return new WP_REST_Response( $result, 200 );
 	}
 
@@ -251,7 +259,12 @@ class BG_Admin_Rest_Controller {
 	}
 
 	public static function list_backups( WP_REST_Request $request ) {
-		return new WP_REST_Response( BG_Logs::list_backup_files(), 200 );
+		$files = BG_Logs::list_backup_files();
+		$format = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
+		foreach ( $files as &$file ) {
+			$file['modified_formatted'] = wp_date( $format, $file['modified'] );
+		}
+		return new WP_REST_Response( $files, 200 );
 	}
 
 	public static function delete_backup( WP_REST_Request $request ) {

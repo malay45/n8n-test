@@ -20,6 +20,23 @@ class BG_Rest_Controller {
 
 	public static function init() {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
+		add_filter( 'rest_pre_serve_request', array( __CLASS__, 'force_zero_cache' ), 999, 4 );
+
+		// Process async background emails for tampering alerts
+		add_action( 'bg_send_tamper_alert', function( $to, $subject, $message ) {
+			wp_mail( $to, $subject, $message );
+		}, 10, 3 );
+	}
+
+	public static function force_zero_cache( $served, $result, $request, $server ) {
+		if ( strpos( $request->get_route(), '/session/status' ) !== false ) {
+			// Bypass Cloudways/Nginx/Breeze caching layers at the lowest PHP level
+			header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
+			header( 'Pragma: no-cache', true );
+			header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
+			header( 'X-Accel-Expires: 0', true ); // Explicit bypass for Nginx
+		}
+		return $served;
 	}
 
 	public static function register_routes() {
@@ -250,7 +267,7 @@ class BG_Rest_Controller {
 					$user_id,
 					$user_info->user_email
 				);
-				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+				wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body ) );
 				
 				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
@@ -333,7 +350,7 @@ class BG_Rest_Controller {
 				$user_id,
 				$user_info->user_email
 			);
-			wp_mail( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
+			wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body ) );
 			
 			$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 			return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
@@ -370,6 +387,12 @@ class BG_Rest_Controller {
 
 	public static function session_status( WP_REST_Request $request ) {
 		$user_id = get_current_user_id();
+
+		// Set headers natively right before response generation as an extra precaution
+		header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
+		header( 'Pragma: no-cache', true );
+		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
+		header( 'X-Accel-Expires: 0', true );
 
 		return new WP_REST_Response(
 			array(
