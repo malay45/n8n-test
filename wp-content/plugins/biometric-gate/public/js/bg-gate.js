@@ -96,7 +96,16 @@
 		}, 500);
 
 		startStatusHeartbeat();
-		runScanCycle();
+
+		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
+		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
+		// If the user is already verified (!isBlockingShell), defer the heavy background scan
+		// check so Presto Player and YouTube assets get full priority in Chrome's connection queue.
+		if (!isBlockingShell) {
+			window.setTimeout(runScanCycle, 15000);
+		} else {
+			runScanCycle();
+		}
 
 		// Deferred, off the critical page-load path: mutating a YouTube iframe's src (to add
 		// enablejsapi=1) forces the browser to discard and reload that embed from scratch —
@@ -143,6 +152,13 @@
 
 		if (!navigator.onLine) {
 			showConnectionLost();
+			return;
+		}
+
+		// Point 1 Fix: Strict asynchronous throttling. Yield entirely to initial Presto/YouTube
+		// player setups during the first 15 seconds of page load. Unconditional to prevent stalls.
+		if (window.performance && window.performance.now() < 15000) {
+			window.setTimeout(runStatusHeartbeatTick, 2000);
 			return;
 		}
 
@@ -799,9 +815,9 @@
 					scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
 					return;
 				}
-				
+
 				currentTicket = res.ticket;
-				
+
 				if (activeStream) {
 					captureAndSubmit(activeStream, false);
 				} else {
@@ -1230,6 +1246,7 @@
 		return fetch(config.restUrl + path, {
 			method: 'POST',
 			credentials: 'same-origin',
+			priority: 'high', // Force Chrome to jump this ahead of background admin-ajax.php requests
 			headers: {
 				'Content-Type': 'application/json',
 				'X-WP-Nonce': config.nonce,

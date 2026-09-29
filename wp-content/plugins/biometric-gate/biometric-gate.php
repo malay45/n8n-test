@@ -33,14 +33,20 @@ if ( isset( $_SERVER['REQUEST_METHOD'] ) && $_SERVER['REQUEST_METHOD'] === 'GET'
 		// This intercept die()s before the REST server loads, so REST-level header filters
 		// never run for it — the zero-cache rule has to be sent right here, ahead of every
 		// response path below (200/401/403), or Varnish/Breeze/the browser may cache it.
-		// header_remove() first: PHP's header() replaces a same-named header by default, but
-		// that only helps against headers *we* set earlier in this same request — it's a no-op
-		// against a header some other must-use plugin or drop-in already queued before this file
-		// even loaded. Stripping first guarantees ours is the only Cache-Control value that
-		// exists by the time this response leaves PHP, whatever ran ahead of us.
-		header_remove( 'Cache-Control' );
-		header_remove( 'Pragma' );
-		header_remove( 'Expires' );
+		// We use a native PHP array loop to scrub out any trailing or appended 'Cache-Control'
+		// keys injected by drop-ins or mu-plugins before we set our definitive rule.
+		$headers = headers_list();
+		foreach ( $headers as $header ) {
+			if ( stripos( $header, 'Cache-Control' ) === 0 || stripos( $header, 'Pragma' ) === 0 || stripos( $header, 'Expires' ) === 0 || stripos( $header, 'Last-Modified' ) === 0 || stripos( $header, 'ETag' ) === 0 ) {
+				$parts = explode( ':', $header, 2 );
+				header_remove( trim( $parts[0] ) );
+			}
+		}
+
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true ); // Tell Breeze/Cloudways Varnish not to forcefully strip our headers.
+		}
+
 		header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
 		header( 'Pragma: no-cache', true );
 		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
