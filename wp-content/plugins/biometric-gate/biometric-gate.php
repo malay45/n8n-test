@@ -111,9 +111,15 @@ BG_Session::init();
 BG_Logs::init();
 BG_Rest_Controller::init();
 BG_Admin_Rest_Controller::init();
-BG_Content_Guard::init();
+// Point 6: 100% strict template conditional to guarantee zero hooks load on unprotected pages like the homepage.
+add_action('wp', function() {
+	if ( BG_Route_Matcher::path_is_protected( BG_Route_Matcher::current_path() ) ) {
+		BG_Content_Guard::init();
+		BG_Frontend::init();
+	}
+});
+
 BG_Cache_Compat::init();
-BG_Frontend::init();
 BG_Admin_Page::init();
 
 

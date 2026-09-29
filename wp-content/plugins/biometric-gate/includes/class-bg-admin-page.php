@@ -369,7 +369,7 @@ class BG_Admin_Page {
 				<tr>
 					<th scope="row"><?php esc_html_e( 'Database Tampering Redirection URL', 'biometric-gate' ); ?></th>
 					<td>
-						<input type="url" name="tampered_redirect_url" placeholder="<?php echo esc_url( home_url() ); ?>" value="<?php echo esc_attr( $settings['tampered_redirect_url'] ); ?>" class="regular-text" />
+						<input type="url" name="tampered_redirect_url" placeholder="<?php echo esc_url( home_url() ); ?>" value="<?php echo esc_attr( $settings['tampered_redirect_url'] ); ?>" class="large-text" />
 						<p class="description"><?php esc_html_e( 'If a corrupted or tampered database string is detected, the user is locked out, their session is cleared, and they are redirected to this URL (Home Page by default).', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>

@@ -267,7 +267,7 @@ class BG_Rest_Controller {
 					$user_id,
 					$user_info->user_email
 				);
-				wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body ) );
+				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
 				
 				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
@@ -332,14 +332,16 @@ class BG_Rest_Controller {
 		$user_id = get_current_user_id();
 		$reason  = (string) $request->get_param( 'reason' );
 
+		// Increment strike counter for ALL security violations, not just tampering.
+		$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+		update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+
 		if ( 'overlay_tampered' === $reason ) {
 			$page_title = 'CRITICAL: Element Deletion Detected';
 			$page_url   = (string) $request->get_param( 'page_url' );
 			BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
 			
 			update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
-			$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
-			update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
 			
 			BG_Session::lock_tampered_account( $user_id );
 			
@@ -350,7 +352,7 @@ class BG_Rest_Controller {
 				$user_id,
 				$user_info->user_email
 			);
-			wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body ) );
+			wp_mail( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
 			
 			$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 			return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );

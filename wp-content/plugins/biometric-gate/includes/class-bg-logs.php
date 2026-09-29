@@ -25,6 +25,16 @@ class BG_Logs
 		add_action('bg_recurring_retention_prune', array(__CLASS__, 'run_retention_prune'));
 		add_action('bg_job_export_and_wipe', array(__CLASS__, 'run_export_and_wipe'), 10, 2);
 		add_action('bg_job_export_user', array(__CLASS__, 'run_export_user'), 10, 2);
+
+		// Fallback for broken WP-Cron environments (like Basic-Auth staging sites)
+		add_action('admin_init', array(__CLASS__, 'fallback_cron_prune'));
+	}
+
+	public static function fallback_cron_prune() {
+		if (false === get_transient('bg_fallback_cron_prune')) {
+			set_transient('bg_fallback_cron_prune', 1, 5 * MINUTE_IN_SECONDS);
+			self::run_retention_prune();
+		}
 	}
 
 	/**
@@ -236,7 +246,7 @@ class BG_Logs
 				fputcsv(
 					$handle,
 					array(
-						self::format_local_time($row['created_at'], 'Y-m-d H:i:s'),
+						self::format_local_time($row['created_at']),
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
@@ -271,7 +281,9 @@ class BG_Logs
 
 	private static function backup_filepath($prefix)
 	{
-		$filename = sprintf('%s-%s.csv', sanitize_file_name($prefix), wp_date('Y-m-d-His'));
+		$date_str = sanitize_file_name(wp_date(get_option('date_format')));
+		$time_str = wp_date('His');
+		$filename = sprintf('%s-%s-%s.csv', sanitize_file_name($prefix), $date_str, $time_str);
 		return trailingslashit(BG_BACKUP_DIR) . $filename;
 	}
 
@@ -425,7 +437,7 @@ class BG_Logs
 				fputcsv(
 					$handle,
 					array(
-						self::format_local_time($row['created_at'], 'Y-m-d H:i:s'),
+						self::format_local_time($row['created_at']),
 						$row['user_id'],
 						isset($names[(int) $row['user_id']]) ? $names[(int) $row['user_id']] : '(deleted user)',
 						'tampered' === $row['scan_status'] ? 'CRITICAL: Database String Integrity Failure' : $row['scan_status'],
