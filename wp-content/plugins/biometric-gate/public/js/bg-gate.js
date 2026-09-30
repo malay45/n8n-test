@@ -404,6 +404,7 @@
 		// document.fullscreenElement above, so it needs its own exit/restore pair — without
 		// this, the dialog below would open underneath the still-fullscreen native video player
 		// and never actually be seen (item 5.4).
+
 		if (iosFullscreenVideoEl) {
 			lastIosFullscreenVideo = iosFullscreenVideoEl;
 			try {
@@ -411,9 +412,39 @@
 			} catch (e) { /* ignore */ }
 		}
 
+		var currentFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+		var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+		
+		// CRITICAL: Firefox Bug #1778915 blocks all clicks on Top Layer <dialog>s (showModal) 
+		// if a fullscreen element is active. We must exit fullscreen in Firefox so the user 
+		// can click the buttons. Chrome/Safari do not have this issue.
+		if (currentFs && isFirefox) {
+			try {
+				if (document.exitFullscreen) document.exitFullscreen();
+				else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+			} catch (e) { /* ignore */ }
+		} 
+		
+		if (overlayEl.parentNode !== document.body) {
+			document.body.appendChild(overlayEl);
+		}
+
 		if (!overlayEl.open) {
+			overlayEl.style.cssText = '';
 			overlayEl.showModal();
 		}
+		
+		if (canvasEl) {
+			var ctx = canvasEl.getContext('2d');
+			if (ctx) {
+				ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+			}
+		}
+		if (videoEl) {
+			videoEl.srcObject = null;
+			videoEl.load();
+		}
+		
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -470,6 +501,14 @@
 			stopStream(activeStream);
 			activeStream = null;
 		}
+
+		if (overlayEl && overlayEl.parentNode !== document.body) {
+			document.body.appendChild(overlayEl);
+		}
+		if (overlayEl) {
+			overlayEl.style.cssText = '';
+		}
+
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
@@ -486,21 +525,29 @@
 	}
 
 	function observeTampering() {
-		var observer = new MutationObserver(function () {
+		var checkTamper = function () {
 			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl) {
 				return;
 			}
-			var stillPresent = document.body.contains(overlayEl);
+			// Use isConnected because overlayEl might be moved into a Shadow DOM (e.g. presto-player)
+			// to preserve fullscreen layout in Firefox, which causes document.body.contains to fail.
+			var stillPresent = overlayEl.isConnected;
+			var cardPresent = !!overlayEl.querySelector('.bg-gate-card');
 			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
 
-			if (!stillPresent) {
+			if (!stillPresent || !cardPresent) {
 				killSwitch('overlay_tampered');
 			} else if (overlayEl.open && !stillVisible) {
 				killSwitch('overlay_tampered');
 			}
-		});
+		};
 
-		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
+		var observer = new MutationObserver(checkTamper);
+		observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
+		
+		// Set interval serves as a fallback to catch deletions inside Shadow DOM boundaries
+		// which MutationObserver on documentElement cannot see.
+		window.setInterval(checkTamper, 1000);
 	}
 
 	/**

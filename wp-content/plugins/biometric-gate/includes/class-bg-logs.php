@@ -32,7 +32,16 @@ class BG_Logs
 
 	public static function fallback_cron_prune() {
 		if (false === get_transient('bg_fallback_cron_prune')) {
-			set_transient('bg_fallback_cron_prune', 1, 5 * MINUTE_IN_SECONDS);
+			$retention = BG_Settings::get()['retention'];
+			$interval = HOUR_IN_SECONDS;
+			if ( '15m' === $retention ) {
+				$interval = 15 * MINUTE_IN_SECONDS;
+			} elseif ( '1h' === $retention ) {
+				$interval = HOUR_IN_SECONDS;
+			} elseif ( is_numeric( $retention ) && $retention > 0 ) {
+				$interval = $retention * DAY_IN_SECONDS;
+			}
+			set_transient('bg_fallback_cron_prune', 1, $interval);
 			self::run_retention_prune();
 		}
 	}

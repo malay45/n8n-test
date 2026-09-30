@@ -387,24 +387,29 @@ class BG_Rest_Controller {
 		);
 	}
 
-	public static function session_status( WP_REST_Request $request ) {
-		$user_id = get_current_user_id();
+	public static function session_status(WP_REST_Request $request)
+    {
+        $user_id = get_current_user_id();
 
-		// Set headers natively right before response generation as an extra precaution
-		header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
-		header( 'Pragma: no-cache', true );
-		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
-		header( 'X-Accel-Expires: 0', true );
+        $response = new WP_REST_Response(
+            array(
+                'has_valid_session' => BG_Session::has_valid_session($user_id),
+                'bypass'            => BG_Session::is_bypassed($user_id),
+                'locked'            => BG_Session::is_locked($user_id),
+            ),
+            200
+        );
 
-		return new WP_REST_Response(
-			array(
-				'has_valid_session' => BG_Session::has_valid_session( $user_id ),
-				'bypass'             => BG_Session::is_bypassed( $user_id ),
-				'locked'             => BG_Session::is_locked( $user_id ),
-			),
-			200
-		);
-	}
+        // Set headers directly on the WP_REST_Response object
+        $response->set_headers(array(
+            'Cache-Control'   => 'private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0',
+            'Pragma'          => 'no-cache',
+            'Expires'         => 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'X-Accel-Expires' => '0',
+        ));
+
+        return $response;
+    }
 
 	private static function seconds_until_rescan( $user_id ) {
 		$elapsed   = BG_Session::seconds_since_last_verification( $user_id );
