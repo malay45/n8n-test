@@ -397,9 +397,8 @@ class BG_Logs
 			$wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 		);
 
-		if ($has_old_rows < 1) {
-			return;
-		}
+		// Even if there are no old rows, we continue so that an empty CSV with the 'No user coming'
+		// message is generated, giving the admin a tangible proof that the cron ran.
 
 		// Back up exactly the rows about to be pruned before deleting them.
 		$filepath = self::backup_filepath('biometric-logs-retention-prune');
@@ -420,6 +419,10 @@ class BG_Logs
 		global $wpdb;
 
 		$logs_table = BG_Activator::table_name();
+		if ( ! file_exists( BG_BACKUP_DIR ) ) {
+			wp_mkdir_p( BG_BACKUP_DIR );
+		}
+
 		$handle     = @fopen($filepath, 'w');
 		if (false === $handle) {
 			return;
@@ -428,6 +431,7 @@ class BG_Logs
 		fputcsv($handle, array('Timestamp (' . wp_timezone_string() . ')', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
 
 		$last_id = 0;
+		$written = 0;
 		do {
 			$sql  = "SELECT id, user_id, scan_status, page_title, page_url, confidence_score, created_at FROM {$logs_table} WHERE id > %d AND created_at < %s ORDER BY id ASC LIMIT %d";
 			$rows = $wpdb->get_results($wpdb->prepare($sql, $last_id, $cutoff, self::BATCH_SIZE), ARRAY_A); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -457,9 +461,26 @@ class BG_Logs
 				);
 				$last_id = max($last_id, (int) $row['id']);
 			}
+			
+			$written += count($rows);
 
 			unset($rows, $user_ids, $names);
 		} while (true);
+
+		if ( 0 === $written ) {
+			fputcsv(
+				$handle,
+				array(
+					self::format_local_time(current_time('mysql', true)),
+					'',
+					'No user activity during this time.',
+					'',
+					'',
+					'',
+					'',
+				)
+			);
+		}
 
 		fclose($handle);
 	}

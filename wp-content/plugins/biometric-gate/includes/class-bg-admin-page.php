@@ -294,10 +294,27 @@ class BG_Admin_Page {
 					<th scope="row"><label for="retention"><?php esc_html_e( 'Log Retention Purge Limit', 'biometric-gate' ); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach ( array( '15m' => '15 Minutes (testing)', '1h' => '1 Hour (testing)', '1' => '1 Day', '7' => '7 Days', '30' => '30 Days', '90' => '90 Days', '180' => '180 Days', '365' => '365 Days', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
+							<?php foreach ( array( '15m' => '15 Minutes', '1h' => '1 Hour', '1' => '1 Day', '30' => '1 Month', '90' => '3 Months', '180' => '6 Months', '365' => '1 Year', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $settings['retention'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label><?php esc_html_e( 'Server Cron Command', 'biometric-gate' ); ?></label></th>
+					<td>
+						<?php
+						$cron_url = rest_url( BG_REST_NAMESPACE . '/cron/retention' );
+						$curl_cmd = sprintf( 'curl -s -X POST "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
+						$wget_cmd = sprintf( 'wget -q -O - "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
+						?>
+						<p><?php echo wp_kses_post( __( 'To ensure log exports run precisely on time regardless of site traffic, copy one of these commands into your server\'s cron job manager (e.g. Cloudways Cron Job Management). Set the schedule to run <strong>Every Minute (* * * * *)</strong>.', 'biometric-gate' ) ); ?></p>
+						<p><strong>cURL:</strong><br>
+							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $curl_cmd ); ?>" onclick="this.select();" />
+						</p>
+						<p><strong>Wget:</strong><br>
+							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $wget_cmd ); ?>" onclick="this.select();" />
+						</p>
 					</td>
 				</tr>
 				<tr>

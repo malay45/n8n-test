@@ -136,7 +136,7 @@
 		if (statusHeartbeatTimer) {
 			window.clearTimeout(statusHeartbeatTimer);
 		}
-		statusHeartbeatTimer = window.setTimeout(runStatusHeartbeatTick, 5000);
+		statusHeartbeatTimer = window.setTimeout(runStatusHeartbeatTick, 25000);
 	}
 
 	function runStatusHeartbeatTick() {
@@ -415,16 +415,9 @@
 		var currentFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
 		var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
 		
-		// CRITICAL: Firefox Bug #1778915 blocks all clicks on Top Layer <dialog>s (showModal) 
-		// if a fullscreen element is active. We must exit fullscreen in Firefox so the user 
-		// can click the buttons. Chrome/Safari do not have this issue.
-		if (currentFs && isFirefox) {
-			try {
-				if (document.exitFullscreen) document.exitFullscreen();
-				else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
-			} catch (e) { /* ignore */ }
-		} 
-		
+		// We no longer exit desktop fullscreen here. Modern HTML5 <dialog> elements via showModal() 
+		// are placed in the Top Layer and will naturally render on top of a fullscreen video.
+		// Exiting fullscreen was causing the video to shrink and fail to restore due to browser user-gesture limits.
 		if (overlayEl.parentNode !== document.body) {
 			document.body.appendChild(overlayEl);
 		}
