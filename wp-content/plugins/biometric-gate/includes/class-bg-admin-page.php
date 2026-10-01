@@ -202,6 +202,11 @@ class BG_Admin_Page {
 	private static function render_settings_tab() {
 		$notice = '';
 
+		if ( isset( $_POST['bg_regenerate_cron_secret'], $_POST['bg_cron_secret_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['bg_cron_secret_nonce'] ) ), 'bg_regenerate_cron_secret' ) ) {
+			update_option( BG_Settings::CRON_SECRET_KEY, wp_generate_password( 40, false, false ), false );
+			$notice = '<div class="notice notice-success"><p>' . esc_html__( 'Cron key regenerated. Update your server cron job with the new URL below before the old one stops working.', 'biometric-gate' ) . '</p></div>';
+		}
+
 		if ( isset( $_POST['bg_settings_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['bg_settings_nonce'] ) ), 'bg_save_settings' ) ) {
 			$input = array(
 				'gate_status'         => isset( $_POST['gate_status'] ) ? sanitize_text_field( wp_unslash( $_POST['gate_status'] ) ) : 'off',
@@ -304,17 +309,22 @@ class BG_Admin_Page {
 					<th scope="row"><label><?php esc_html_e( 'Server Cron Command', 'biometric-gate' ); ?></label></th>
 					<td>
 						<?php
-						$cron_url = rest_url( BG_REST_NAMESPACE . '/cron/retention' );
-						$curl_cmd = sprintf( 'curl -s -X POST "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
+						$cron_url = add_query_arg( 'key', BG_Settings::get_cron_secret(), rest_url( BG_REST_NAMESPACE . '/cron/retention' ) );
+						$curl_cmd = sprintf( 'curl -s "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
 						$wget_cmd = sprintf( 'wget -q -O - "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
 						?>
-						<p><?php echo wp_kses_post( __( 'To ensure log exports run precisely on time regardless of site traffic, copy one of these commands into your server\'s cron job manager (e.g. Cloudways Cron Job Management). Set the schedule to run <strong>Every Minute (* * * * *)</strong>.', 'biometric-gate' ) ); ?></p>
+						<p><?php echo wp_kses_post( __( 'WordPress\'s own scheduler only checks for due jobs when something visits the site — on a quiet admin-only staging site that can mean retention pruning silently waits for the next login instead of running on time. Paste <strong>one</strong> of these into a <strong>real</strong> server cron job (Cloudways: Server Management → your app → Cron Job Management → Add Cron Job) scheduled <strong>Every Minute (* * * * *)</strong> — the endpoint itself only actually prunes once per retention window, so calling it every minute is cheap and correct, not wasteful.', 'biometric-gate' ) ); ?></p>
 						<p><strong>cURL:</strong><br>
 							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $curl_cmd ); ?>" onclick="this.select();" />
 						</p>
 						<p><strong>Wget:</strong><br>
 							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $wget_cmd ); ?>" onclick="this.select();" />
 						</p>
+						<p class="description"><?php esc_html_e( 'The key in this URL is this site\'s private cron secret — treat it like a password. Pasting it only into your own Cloudways cron job manager (never a public page) is safe.', 'biometric-gate' ); ?></p>
+						<form method="post" style="display:inline;" onsubmit="return confirm('<?php echo esc_js( __( 'Regenerate the cron key? Any cron job still using the old URL will stop working until you update it.', 'biometric-gate' ) ); ?>');">
+							<?php wp_nonce_field( 'bg_regenerate_cron_secret', 'bg_cron_secret_nonce' ); ?>
+							<button type="submit" name="bg_regenerate_cron_secret" value="1" class="button"><?php esc_html_e( 'Regenerate Cron Key', 'biometric-gate' ); ?></button>
+						</form>
 					</td>
 				</tr>
 				<tr>

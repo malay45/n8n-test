@@ -8,7 +8,28 @@ defined( 'ABSPATH' ) || exit;
 
 class BG_Settings {
 
-	const OPTION_KEY = 'bg_settings';
+	const OPTION_KEY      = 'bg_settings';
+	const CRON_SECRET_KEY = 'bg_cron_secret';
+
+	/**
+	 * Shared secret for the unauthenticated /cron/retention REST endpoint (a real system cron
+	 * job has no WordPress session or nonce to present). Stored in its own option — not inside
+	 * the main settings array — so it survives a Tab B save/sanitize cycle untouched and is
+	 * never silently regenerated or wiped out from under an already-configured server cron job.
+	 * Generated once, lazily, on first access.
+	 *
+	 * @return string
+	 */
+	public static function get_cron_secret() {
+		$secret = get_option( self::CRON_SECRET_KEY );
+
+		if ( ! is_string( $secret ) || '' === $secret ) {
+			$secret = wp_generate_password( 40, false, false );
+			update_option( self::CRON_SECRET_KEY, $secret, false );
+		}
+
+		return $secret;
+	}
 
 	/**
 	 * @return array<string,mixed>

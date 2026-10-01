@@ -111,11 +111,36 @@ class BG_Rest_Controller {
 			BG_REST_NAMESPACE,
 			'/cron/retention',
 			array(
-				'methods'             => 'POST, GET',
+				'methods'             => array( 'GET', 'POST' ),
 				'callback'            => array( __CLASS__, 'run_retention_prune_cron' ),
-				'permission_callback' => '__return_true',
+				// Deliberately not require_logged_in_user(): a real system cron job (curl/wget
+				// from Cloudways' Cron Job Management, no browser session, no nonce) is exactly
+				// who needs to call this — see require_cron_secret() for how it's secured instead.
+				'permission_callback' => array( __CLASS__, 'require_cron_secret' ),
+				'args'                => array(
+					'key' => array( 'type' => 'string', 'required' => true ),
+				),
 			)
 		);
+	}
+
+	/**
+	 * A real external cron job (no WordPress session, no nonce) is the whole point of this
+	 * endpoint — see BG_Settings::get_cron_secret() and Tab B's "Server Cron Command" field for
+	 * where the matching key is generated and displayed. Without this check the endpoint was
+	 * wide open to the public internet: cheap to call repeatedly (its own block_id bucketing
+	 * already no-ops outside the due window) but there's no reason to leave a write-triggering
+	 * URL unauthenticated when a one-time copy-pasted key costs nothing.
+	 */
+	public static function require_cron_secret( WP_REST_Request $request ) {
+		$provided = (string) $request->get_param( 'key' );
+		$expected = BG_Settings::get_cron_secret();
+
+		if ( '' === $provided || ! hash_equals( $expected, $provided ) ) {
+			return new WP_Error( 'bg_bad_cron_key', __( 'Invalid or missing cron key.', 'biometric-gate' ), array( 'status' => 403 ) );
+		}
+
+		return true;
 	}
 
 	public static function require_logged_in_user( WP_REST_Request $request ) {
