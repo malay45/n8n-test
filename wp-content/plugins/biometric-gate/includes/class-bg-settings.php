@@ -8,7 +8,28 @@ defined( 'ABSPATH' ) || exit;
 
 class BG_Settings {
 
-	const OPTION_KEY = 'bg_settings';
+	const OPTION_KEY      = 'bg_settings';
+	const CRON_SECRET_KEY = 'bg_cron_secret';
+
+	/**
+	 * Shared secret for the unauthenticated /cron/retention REST endpoint (a real system cron
+	 * job has no WordPress session or nonce to present). Stored in its own option — not inside
+	 * the main settings array — so it survives a Tab B save/sanitize cycle untouched and is
+	 * never silently regenerated or wiped out from under an already-configured server cron job.
+	 * Generated once, lazily, on first access.
+	 *
+	 * @return string
+	 */
+	public static function get_cron_secret() {
+		$secret = get_option( self::CRON_SECRET_KEY );
+
+		if ( ! is_string( $secret ) || '' === $secret ) {
+			$secret = wp_generate_password( 40, false, false );
+			update_option( self::CRON_SECRET_KEY, $secret, false );
+		}
+
+		return $secret;
+	}
 
 	/**
 	 * @return array<string,mixed>
@@ -147,7 +168,7 @@ class BG_Settings {
 		// instead of waiting a day or more — see BG_Logs::run_retention_prune() for how these
 		// sub-day values are interpreted, and BG_Activator for the cron interval fine enough to
 		// actually observe them.
-		$allowed_retention = array( '15m', '1h', '1', '7', '30', '90', '180', '365', 'forever' );
+		$allowed_retention = array( '15m', '1h', '1', '30', '90', '180', '365', 'forever' );
 		$clean['retention'] = ( isset( $input['retention'] ) && in_array( $input['retention'], $allowed_retention, true ) )
 			? $input['retention']
 			: '90';

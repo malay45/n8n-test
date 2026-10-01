@@ -106,6 +106,41 @@ class BG_Rest_Controller {
 				),
 			)
 		);
+
+		register_rest_route(
+			BG_REST_NAMESPACE,
+			'/cron/retention',
+			array(
+				'methods'             => array( 'GET', 'POST' ),
+				'callback'            => array( __CLASS__, 'run_retention_prune_cron' ),
+				// Deliberately not require_logged_in_user(): a real system cron job (curl/wget
+				// from Cloudways' Cron Job Management, no browser session, no nonce) is exactly
+				// who needs to call this — see require_cron_secret() for how it's secured instead.
+				'permission_callback' => array( __CLASS__, 'require_cron_secret' ),
+				'args'                => array(
+					'key' => array( 'type' => 'string', 'required' => true ),
+				),
+			)
+		);
+	}
+
+	/**
+	 * A real external cron job (no WordPress session, no nonce) is the whole point of this
+	 * endpoint — see BG_Settings::get_cron_secret() and Tab B's "Server Cron Command" field for
+	 * where the matching key is generated and displayed. Without this check the endpoint was
+	 * wide open to the public internet: cheap to call repeatedly (its own block_id bucketing
+	 * already no-ops outside the due window) but there's no reason to leave a write-triggering
+	 * URL unauthenticated when a one-time copy-pasted key costs nothing.
+	 */
+	public static function require_cron_secret( WP_REST_Request $request ) {
+		$provided = (string) $request->get_param( 'key' );
+		$expected = BG_Settings::get_cron_secret();
+
+		if ( '' === $provided || ! hash_equals( $expected, $provided ) ) {
+			return new WP_Error( 'bg_bad_cron_key', __( 'Invalid or missing cron key.', 'biometric-gate' ), array( 'status' => 403 ) );
+		}
+
+		return true;
 	}
 
 	public static function require_logged_in_user( WP_REST_Request $request ) {
@@ -267,7 +302,7 @@ class BG_Rest_Controller {
 					$user_id,
 					$user_info->user_email
 				);
-				wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body ) );
+				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
 				
 				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
@@ -332,14 +367,16 @@ class BG_Rest_Controller {
 		$user_id = get_current_user_id();
 		$reason  = (string) $request->get_param( 'reason' );
 
+		// Increment strike counter for ALL security violations, not just tampering.
+		$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
+		update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
+
 		if ( 'overlay_tampered' === $reason ) {
 			$page_title = 'CRITICAL: Element Deletion Detected';
 			$page_url   = (string) $request->get_param( 'page_url' );
 			BG_Logs::insert( $user_id, 'tampered', $page_title, $page_url, 0.0 );
 			
 			update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
-			$strikes = (int) get_user_meta( $user_id, 'biometric_strikes', true );
-			update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
 			
 			BG_Session::lock_tampered_account( $user_id );
 			
@@ -350,7 +387,7 @@ class BG_Rest_Controller {
 				$user_id,
 				$user_info->user_email
 			);
-			wp_schedule_single_event( time(), 'bg_send_tamper_alert', array( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body ) );
+			wp_mail( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
 			
 			$redirect_url = BG_Settings::get()['tampered_redirect_url'];
 			return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
@@ -385,23 +422,91 @@ class BG_Rest_Controller {
 		);
 	}
 
-	public static function session_status( WP_REST_Request $request ) {
-		$user_id = get_current_user_id();
+	public static function session_status(WP_REST_Request $request)
+    {
+        $user_id = get_current_user_id();
 
-		// Set headers natively right before response generation as an extra precaution
-		header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
-		header( 'Pragma: no-cache', true );
-		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
-		header( 'X-Accel-Expires: 0', true );
+        $response = new WP_REST_Response(
+            array(
+                'has_valid_session' => BG_Session::has_valid_session($user_id),
+                'bypass'            => BG_Session::is_bypassed($user_id),
+                'locked'            => BG_Session::is_locked($user_id),
+            ),
+            200
+        );
 
-		return new WP_REST_Response(
-			array(
-				'has_valid_session' => BG_Session::has_valid_session( $user_id ),
-				'bypass'             => BG_Session::is_bypassed( $user_id ),
-				'locked'             => BG_Session::is_locked( $user_id ),
-			),
-			200
-		);
+        // Set headers directly on the WP_REST_Response object
+        $response->set_headers(array(
+            'Cache-Control'   => 'private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0',
+            'Pragma'          => 'no-cache',
+            'Expires'         => 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'X-Accel-Expires' => '0',
+        ));
+
+        return $response;
+    }
+
+	public static function run_retention_prune_cron( WP_REST_Request $request ) {
+		$retention = BG_Settings::get()['retention'];
+		if ( 'forever' === $retention ) {
+			return new WP_REST_Response( array( 'status' => 'skipped', 'reason' => 'forever' ), 200 );
+		}
+
+		$current_time = current_datetime();
+		$m = (int) $current_time->format('i');
+		$h = (int) $current_time->format('H');
+		$d = (int) $current_time->format('d');
+		$mon = (int) $current_time->format('m');
+		$y = (int) $current_time->format('Y');
+		$last_day = (int) $current_time->format('t');
+
+		$should_run = false;
+		$block_id = '';
+
+		if ( '15m' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h . '-' . floor( $m / 15 );
+		} elseif ( '1h' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h;
+		} elseif ( '1' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d;
+		} elseif ( '30' === $retention ) {
+			if ( $d === $last_day ) {
+				$should_run = true;
+				$block_id = $y . '-' . $mon;
+			}
+		} elseif ( '90' === $retention ) {
+			if ( $d === $last_day && in_array( $mon, array( 3, 6, 9, 12 ), true ) ) {
+				$should_run = true;
+				$block_id = $y . '-q' . ceil( $mon / 3 );
+			}
+		} elseif ( '180' === $retention ) {
+			if ( $d === $last_day && in_array( $mon, array( 6, 12 ), true ) ) {
+				$should_run = true;
+				$block_id = $y . '-h' . ceil( $mon / 6 );
+			}
+		} elseif ( '365' === $retention ) {
+			if ( $d === 31 && $mon === 12 ) {
+				$should_run = true;
+				$block_id = (string) $y;
+			}
+		}
+
+		if ( ! $should_run ) {
+			return new WP_REST_Response( array( 'status' => 'not_time', 'time' => $current_time->format('Y-m-d H:i:s') ), 200 );
+		}
+
+		$last_block = get_option( 'bg_last_cron_block_' . $retention );
+		if ( $last_block === $block_id ) {
+			return new WP_REST_Response( array( 'status' => 'already_run_for_block', 'block' => $block_id ), 200 );
+		}
+
+		update_option( 'bg_last_cron_block_' . $retention, $block_id );
+
+		BG_Logs::run_retention_prune();
+		return new WP_REST_Response( array( 'status' => 'pruned', 'block' => $block_id ), 200 );
 	}
 
 	private static function seconds_until_rescan( $user_id ) {
