@@ -147,7 +147,7 @@ class BG_Settings {
 		// instead of waiting a day or more — see BG_Logs::run_retention_prune() for how these
 		// sub-day values are interpreted, and BG_Activator for the cron interval fine enough to
 		// actually observe them.
-		$allowed_retention = array( '15m', '1h', '1', '7', '30', '90', '180', '365', 'forever' );
+		$allowed_retention = array( '15m', '1h', '1', '30', '90', '180', '365', 'forever' );
 		$clean['retention'] = ( isset( $input['retention'] ) && in_array( $input['retention'], $allowed_retention, true ) )
 			? $input['retention']
 			: '90';

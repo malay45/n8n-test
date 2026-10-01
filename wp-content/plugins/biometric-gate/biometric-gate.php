@@ -33,14 +33,20 @@ if ( isset( $_SERVER['REQUEST_METHOD'] ) && $_SERVER['REQUEST_METHOD'] === 'GET'
 		// This intercept die()s before the REST server loads, so REST-level header filters
 		// never run for it — the zero-cache rule has to be sent right here, ahead of every
 		// response path below (200/401/403), or Varnish/Breeze/the browser may cache it.
-		// header_remove() first: PHP's header() replaces a same-named header by default, but
-		// that only helps against headers *we* set earlier in this same request — it's a no-op
-		// against a header some other must-use plugin or drop-in already queued before this file
-		// even loaded. Stripping first guarantees ours is the only Cache-Control value that
-		// exists by the time this response leaves PHP, whatever ran ahead of us.
-		header_remove( 'Cache-Control' );
-		header_remove( 'Pragma' );
-		header_remove( 'Expires' );
+		// We use a native PHP array loop to scrub out any trailing or appended 'Cache-Control'
+		// keys injected by drop-ins or mu-plugins before we set our definitive rule.
+		$headers = headers_list();
+		foreach ( $headers as $header ) {
+			if ( stripos( $header, 'Cache-Control' ) === 0 || stripos( $header, 'Pragma' ) === 0 || stripos( $header, 'Expires' ) === 0 || stripos( $header, 'Last-Modified' ) === 0 || stripos( $header, 'ETag' ) === 0 ) {
+				$parts = explode( ':', $header, 2 );
+				header_remove( trim( $parts[0] ) );
+			}
+		}
+
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true ); // Tell Breeze/Cloudways Varnish not to forcefully strip our headers.
+		}
+
 		header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
 		header( 'Pragma: no-cache', true );
 		header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
@@ -111,18 +117,13 @@ BG_Session::init();
 BG_Logs::init();
 BG_Rest_Controller::init();
 BG_Admin_Rest_Controller::init();
-BG_Content_Guard::init();
+// Point 6: 100% strict template conditional to guarantee zero hooks load on unprotected pages like the homepage.
+add_action('wp', function() {
+	if ( BG_Route_Matcher::path_is_protected( BG_Route_Matcher::current_path() ) ) {
+		BG_Content_Guard::init();
+		BG_Frontend::init();
+	}
+});
+
 BG_Cache_Compat::init();
-BG_Frontend::init();
 BG_Admin_Page::init();
-
-
-// add_action('init', function() {
-//     $user = get_user_by('login', 'malay_dev');
-//     if ($user) {
-//         delete_user_meta($user->ID, 'bg_account_locked');
-//         delete_user_meta($user->ID, 'locked_tampered');
-//         delete_user_meta($user->ID, 'locked_tampered_reason');
-//         delete_user_meta($user->ID, 'biometric_strikes');
-//     }
-// });

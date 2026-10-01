@@ -263,8 +263,17 @@
 				if (statusCell) {
 					statusCell.textContent = cfg.i18n.idTokenLoaded;
 				}
+				window.alert("Photo uploaded successfully.");
+				fileInput.value = "";
 			})
-			.catch(showError);
+			.catch(function(err) {
+				if (err) {
+					err.message = "Failed to upload photo: " + (err.message || "");
+				} else {
+					err = new Error("Failed to upload photo.");
+				}
+				showError(err);
+			});
 	}
 
 	function exportUserHistory(userId, btn) {

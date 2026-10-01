@@ -158,7 +158,6 @@ class BG_Session {
 		delete_user_meta( $user_id, 'locked_tampered' );
 		delete_user_meta( $user_id, 'bg_account_locked' );
 		delete_user_meta( $user_id, 'locked_tampered_reason' );
-		delete_user_meta( $user_id, 'biometric_strikes' );
 	}
 
 	private static function threshold_seconds() {

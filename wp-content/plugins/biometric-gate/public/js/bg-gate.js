@@ -96,7 +96,16 @@
 		}, 500);
 
 		startStatusHeartbeat();
-		runScanCycle();
+
+		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
+		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
+		// If the user is already verified (!isBlockingShell), defer the heavy background scan
+		// check so Presto Player and YouTube assets get full priority in Chrome's connection queue.
+		if (!isBlockingShell) {
+			window.setTimeout(runScanCycle, 15000);
+		} else {
+			runScanCycle();
+		}
 
 		// Deferred, off the critical page-load path: mutating a YouTube iframe's src (to add
 		// enablejsapi=1) forces the browser to discard and reload that embed from scratch —
@@ -120,10 +129,14 @@
 	 * QA report described as "after each Face Scan, the issue keeps repeating itself".
 	 */
 	function startStatusHeartbeat() {
+		scheduleNextHeartbeat();
+	}
+
+	function scheduleNextHeartbeat() {
 		if (statusHeartbeatTimer) {
-			window.clearInterval(statusHeartbeatTimer);
+			window.clearTimeout(statusHeartbeatTimer);
 		}
-		statusHeartbeatTimer = window.setInterval(runStatusHeartbeatTick, 5000);
+		statusHeartbeatTimer = window.setTimeout(runStatusHeartbeatTick, 25000);
 	}
 
 	function runStatusHeartbeatTick() {
@@ -132,44 +145,96 @@
 		// A scan is actively in progress (ticket minted, camera likely open, /scan/result about
 		// to be posted) — skip this tick rather than adding a redundant concurrent request right
 		// when the security-critical scan traffic needs the server's attention most.
-		if (overlayEl && overlayEl.open) return;
+		if (overlayEl && overlayEl.open) {
+			scheduleNextHeartbeat();
+			return;
+		}
 
 		if (!navigator.onLine) {
 			showConnectionLost();
 			return;
 		}
 
-		// Unique query string per tick so no browser/Varnish/Breeze cache can ever answer
-		// this heartbeat from a stored copy, even before server exclude rules are in place.
-		var statusUrl = config.restUrl + '/session/status';
-		statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
-		fetch(statusUrl, {
-			method: 'GET',
-			headers: { 'X-WP-Nonce': config.nonce },
-			cache: 'no-store'
-		})
-			.then(function (res) {
-				// Only treat actual network drops as a disconnect, not 403/401 errors.
-				if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
-					throw new Error('Network down');
+		// Point 1 Fix: Strict asynchronous throttling. Yield entirely to initial Presto/YouTube
+		// player setups during the first 15 seconds of page load. Unconditional to prevent stalls.
+		if (window.performance && window.performance.now() < 15000) {
+			window.setTimeout(runStatusHeartbeatTick, 2000);
+			return;
+		}
+
+		// Yield priority to active media downloads to prevent connection queue wedging.
+		var isDownloading = false;
+		try {
+			var mediaEls = document.querySelectorAll('video, audio, presto-player, presto-video');
+			for (var i = 0; i < mediaEls.length; i++) {
+				var el = mediaEls[i];
+				// If it's a custom element (like Presto), try to check its internal video if available
+				if (el.tagName && el.tagName.toLowerCase().indexOf('presto') !== -1) {
+					var inner = el.querySelector('video, audio');
+					if (inner && inner.networkState === 2) {
+						isDownloading = true;
+						break;
+					}
+				} else if (el.networkState === 2) { // 2 = HTMLMediaElement.NETWORK_LOADING
+					isDownloading = true;
+					break;
 				}
-				return res.text();
-			})
-			.then(function (text) {
-				// Raw data text string parsed: valid|bypass|locked
-				if (text && text.indexOf('|') !== -1) {
-					var parts = text.split('|');
-					if (parts[2] === '1') {
-						// If account became locked in background
-						if (!isBlockingShell && !overlayEl.open) {
-							window.location.reload();
+			}
+		} catch (e) { /* ignore */ }
+
+		if (isDownloading) {
+			// The player is actively buffering large chunks. Yield this tick entirely and try
+			// again shortly so we don't wedge the browser's thread or connection pool.
+			window.setTimeout(runStatusHeartbeatTick, 1000);
+			return;
+		}
+
+		var doFetch = function () {
+			// Unique query string per tick so no browser/Varnish/Breeze cache can ever answer
+			// this heartbeat from a stored copy, even before server exclude rules are in place.
+			var statusUrl = config.restUrl + '/session/status';
+			statusUrl += (statusUrl.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
+
+			var fetchOpts = {
+				method: 'GET',
+				headers: { 'X-WP-Nonce': config.nonce },
+				cache: 'no-store',
+				priority: 'low',
+				keepalive: true
+			};
+
+			fetch(statusUrl, fetchOpts)
+				.then(function (res) {
+					// Only treat actual network drops as a disconnect, not 403/401 errors.
+					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
+						throw new Error('Network down');
+					}
+					return res.text();
+				})
+				.then(function (text) {
+					// Raw data text string parsed: valid|bypass|locked
+					if (text && text.indexOf('|') !== -1) {
+						var parts = text.split('|');
+						if (parts[2] === '1') {
+							// If account became locked in background
+							if (!isBlockingShell && !overlayEl.open) {
+								window.location.reload();
+							}
 						}
 					}
-				}
-			})
-			.catch(function () {
-				if (!reconnectPollTimer) showConnectionLost();
-			});
+					scheduleNextHeartbeat();
+				})
+				.catch(function () {
+					if (!reconnectPollTimer) showConnectionLost();
+					// Do not reschedule if reconnecting; reconnectPollTimer takes over
+				});
+		};
+
+		if (window.requestIdleCallback) {
+			window.requestIdleCallback(doFetch, { timeout: 2000 });
+		} else {
+			doFetch();
+		}
 	}
 
 	function killSwitchEnabled(type) {
@@ -339,6 +404,7 @@
 		// document.fullscreenElement above, so it needs its own exit/restore pair — without
 		// this, the dialog below would open underneath the still-fullscreen native video player
 		// and never actually be seen (item 5.4).
+
 		if (iosFullscreenVideoEl) {
 			lastIosFullscreenVideo = iosFullscreenVideoEl;
 			try {
@@ -346,9 +412,32 @@
 			} catch (e) { /* ignore */ }
 		}
 
+		var currentFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+		var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+		
+		// We no longer exit desktop fullscreen here. Modern HTML5 <dialog> elements via showModal() 
+		// are placed in the Top Layer and will naturally render on top of a fullscreen video.
+		// Exiting fullscreen was causing the video to shrink and fail to restore due to browser user-gesture limits.
+		if (overlayEl.parentNode !== document.body) {
+			document.body.appendChild(overlayEl);
+		}
+
 		if (!overlayEl.open) {
+			overlayEl.style.cssText = '';
 			overlayEl.showModal();
 		}
+		
+		if (canvasEl) {
+			var ctx = canvasEl.getContext('2d');
+			if (ctx) {
+				ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+			}
+		}
+		if (videoEl) {
+			videoEl.srcObject = null;
+			videoEl.load();
+		}
+		
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -386,7 +475,11 @@
 			mediaRescanTimer = null;
 		}
 
-		resumeAllMedia();
+		// Bug fix (Point 5): Do not forcefully resume media if the browser window
+		// is currently minimized or unfocused. 
+		if (!document.hidden && document.hasFocus()) {
+			resumeAllMedia();
+		}
 
 		// Desktop fullscreen restoration is no longer needed since we no longer exit it.
 
@@ -401,6 +494,14 @@
 			stopStream(activeStream);
 			activeStream = null;
 		}
+
+		if (overlayEl && overlayEl.parentNode !== document.body) {
+			document.body.appendChild(overlayEl);
+		}
+		if (overlayEl) {
+			overlayEl.style.cssText = '';
+		}
+
 		window.setTimeout(function () {
 			intentionalHide = false;
 		}, 0);
@@ -417,21 +518,29 @@
 	}
 
 	function observeTampering() {
-		var observer = new MutationObserver(function () {
+		var checkTamper = function () {
 			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl) {
 				return;
 			}
-			var stillPresent = document.body.contains(overlayEl);
+			// Use isConnected because overlayEl might be moved into a Shadow DOM (e.g. presto-player)
+			// to preserve fullscreen layout in Firefox, which causes document.body.contains to fail.
+			var stillPresent = overlayEl.isConnected;
+			var cardPresent = !!overlayEl.querySelector('.bg-gate-card');
 			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
 
-			if (!stillPresent) {
+			if (!stillPresent || !cardPresent) {
 				killSwitch('overlay_tampered');
 			} else if (overlayEl.open && !stillVisible) {
 				killSwitch('overlay_tampered');
 			}
-		});
+		};
 
-		observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
+		var observer = new MutationObserver(checkTamper);
+		observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
+		
+		// Set interval serves as a fallback to catch deletions inside Shadow DOM boundaries
+		// which MutationObserver on documentElement cannot see.
+		window.setInterval(checkTamper, 1000);
 	}
 
 	/**
@@ -729,14 +838,38 @@
 			}
 		}
 
-		if (activeStream) {
-			captureAndSubmit(activeStream, false);
-		} else {
-			setStatus(config.i18n.verifying || "Starting camera...");
-			getValidCameraStream()
-				.then(auditDevicesThenCapture)
-				.catch(handleCameraError);
-		}
+		// Silently refresh the ticket before starting the countdown/camera to avoid
+		// timeout errors if the user left the modal open and idle for > 60s.
+		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+			.then(function (res) {
+				if (res && res.status === 'redirected') {
+					window.location.href = res.redirect_url || '/';
+					return;
+				}
+				if (res.bypass) {
+					if (isBlockingShell) {
+						window.location.reload();
+						return;
+					}
+					hideOverlay();
+					scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
+					return;
+				}
+
+				currentTicket = res.ticket;
+
+				if (activeStream) {
+					captureAndSubmit(activeStream, false);
+				} else {
+					setStatus(config.i18n.verifying || "Starting camera...");
+					getValidCameraStream()
+						.then(auditDevicesThenCapture)
+						.catch(handleCameraError);
+				}
+			})
+			.catch(function () {
+				showConnectionLost();
+			});
 	}
 
 	function getValidCameraStream() {
@@ -958,7 +1091,7 @@
 			};
 
 			if (isFirstTime) {
-				videoEl.onloadedmetadata = function () {
+				var startPlayback = function () {
 					// Explicitly play the video to kickstart the WebRTC pipeline
 					var playPromise = videoEl.play();
 					if (playPromise !== undefined) {
@@ -971,6 +1104,15 @@
 						startCountdown();
 					}
 				};
+
+				if (videoEl.readyState >= 1) {
+					startPlayback();
+				} else {
+					videoEl.onloadedmetadata = function () {
+						videoEl.onloadedmetadata = null; // CRITICAL: Prevent multiple firings
+						startPlayback();
+					};
+				}
 			} else {
 				startCountdown();
 			}
@@ -1144,6 +1286,7 @@
 		return fetch(config.restUrl + path, {
 			method: 'POST',
 			credentials: 'same-origin',
+			priority: 'high', // Force Chrome to jump this ahead of background admin-ajax.php requests
 			headers: {
 				'Content-Type': 'application/json',
 				'X-WP-Nonce': config.nonce,
