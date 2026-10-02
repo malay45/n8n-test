@@ -78,6 +78,8 @@ class BG_Frontend {
 				'forceNativeIos'         => ! empty( $settings['force_native_ios'] ),
 				'bypassFaceScan'         => ! empty( $settings['bypass_face_scan'] ),
 				'closeButtonRedirectUrl' => esc_url_raw( $settings['close_button_redirect_url'] ),
+				'enableResizeSafetyDelay' => (bool) $settings['enable_resize_safety_delay'],
+				'resizeSafetyDelayMs'    => (int) $settings['resize_safety_delay_ms'],
 
 				'i18n'             => array(
 					'startScan'      => __( 'Start Face Scan', 'biometric-gate' ),

@@ -202,6 +202,11 @@ class BG_Admin_Page {
 	private static function render_settings_tab() {
 		$notice = '';
 
+		if ( isset( $_POST['bg_regenerate_cron_secret'], $_POST['bg_cron_secret_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['bg_cron_secret_nonce'] ) ), 'bg_regenerate_cron_secret' ) ) {
+			update_option( BG_Settings::CRON_SECRET_KEY, wp_generate_password( 40, false, false ), false );
+			$notice = '<div class="notice notice-success"><p>' . esc_html__( 'Cron key regenerated. Update your server cron job with the new URL below before the old one stops working.', 'biometric-gate' ) . '</p></div>';
+		}
+
 		if ( isset( $_POST['bg_settings_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['bg_settings_nonce'] ) ), 'bg_save_settings' ) ) {
 			$input = array(
 				'gate_status'         => isset( $_POST['gate_status'] ) ? sanitize_text_field( wp_unslash( $_POST['gate_status'] ) ) : 'off',
@@ -304,16 +309,11 @@ class BG_Admin_Page {
 					<th scope="row"><label><?php esc_html_e( 'Server Cron Command', 'biometric-gate' ); ?></label></th>
 					<td>
 						<?php
-						$cron_url = rest_url( BG_REST_NAMESPACE . '/cron/retention' );
-						$curl_cmd = sprintf( 'curl -s -X POST "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
-						$wget_cmd = sprintf( 'wget -q -O - "%s" >/dev/null 2>&1', esc_url_raw( $cron_url ) );
+						$cli_cmd = sprintf( 'php %s', BG_PLUGIN_DIR . 'cron.php' );
 						?>
-						<p><?php echo wp_kses_post( __( 'To ensure log exports run precisely on time regardless of site traffic, copy one of these commands into your server\'s cron job manager (e.g. Cloudways Cron Job Management). Set the schedule to run <strong>Every Minute (* * * * *)</strong>.', 'biometric-gate' ) ); ?></p>
-						<p><strong>cURL:</strong><br>
-							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $curl_cmd ); ?>" onclick="this.select();" />
-						</p>
-						<p><strong>Wget:</strong><br>
-							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $wget_cmd ); ?>" onclick="this.select();" />
+						<p><?php echo wp_kses_post( __( 'WordPress\'s own scheduler only checks for due jobs when something visits the site — on a quiet admin-only staging site that can mean retention pruning silently waits for the next login instead of running on time. To completely bypass staging login walls and ensure reliable background execution, paste this into a <strong>real</strong> server cron job scheduled <strong>Every Minute (* * * * *)</strong>. The script implements atomic locking so it only executes once per retention window.', 'biometric-gate' ) ); ?></p>
+						<p><strong>PHP CLI Command:</strong><br>
+							<input type="text" readonly class="large-text" value="<?php echo esc_attr( $cli_cmd ); ?>" onclick="this.select();" style="font-family: monospace;" />
 						</p>
 					</td>
 				</tr>
@@ -427,6 +427,17 @@ class BG_Admin_Page {
 							</tbody>
 						</table>
 						<p class="description"><?php esc_html_e( 'DevTools detection is a window-size heuristic and can misfire (e.g. a resized browser window) — left off by default for that reason.', 'biometric-gate' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Fullscreen & Resize Safety Delay', 'biometric-gate' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="enable_resize_safety_delay" value="1" <?php checked( ! empty( $settings['enable_resize_safety_delay'] ) ); ?> /> <?php esc_html_e( 'Enable Fullscreen Resize Safety Delay', 'biometric-gate' ); ?></label>
+						<p>
+							<label for="resize_safety_delay_ms"><?php esc_html_e( 'Safety Delay Buffer Window (ms):', 'biometric-gate' ); ?></label><br>
+							<input type="number" name="resize_safety_delay_ms" id="resize_safety_delay_ms" value="<?php echo esc_attr( $settings['resize_safety_delay_ms'] ); ?>" class="small-text" min="0" step="100" />
+						</p>
+						<p class="description"><?php esc_html_e( 'Temporarily pauses DOM tampering verification during window resizing or fullscreen toggling to prevent false-positive lockouts (e.g. when WP Shield Content Protector Pro scrambles the DOM).', 'biometric-gate' ); ?></p>
 					</td>
 				</tr>
 				<tr>
