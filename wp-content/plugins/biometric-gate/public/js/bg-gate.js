@@ -414,7 +414,7 @@
 
 		var currentFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
 		var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
-		
+
 		// We no longer exit desktop fullscreen here. Modern HTML5 <dialog> elements via showModal() 
 		// are placed in the Top Layer and will naturally render on top of a fullscreen video.
 		// Exiting fullscreen was causing the video to shrink and fail to restore due to browser user-gesture limits.
@@ -426,7 +426,7 @@
 			overlayEl.style.cssText = '';
 			overlayEl.showModal();
 		}
-		
+
 		if (canvasEl) {
 			var ctx = canvasEl.getContext('2d');
 			if (ctx) {
@@ -437,7 +437,7 @@
 			videoEl.srcObject = null;
 			videoEl.load();
 		}
-		
+
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -521,13 +521,13 @@
 	var tamperDebounceTimer = null;
 
 	function observeTampering() {
-		var triggerTamperDebounce = function() {
+		var triggerTamperDebounce = function () {
 			// default to true if undefined
 			if (config.enableResizeSafetyDelay === false) return;
 			var delay = parseInt(config.resizeSafetyDelayMs, 10) || 2500;
 			isTamperDebounced = true;
 			if (tamperDebounceTimer) window.clearTimeout(tamperDebounceTimer);
-			tamperDebounceTimer = window.setTimeout(function() {
+			tamperDebounceTimer = window.setTimeout(function () {
 				isTamperDebounced = false;
 			}, delay);
 		};
@@ -555,7 +555,7 @@
 
 		var observer = new MutationObserver(checkTamper);
 		observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
-		
+
 		// Set interval serves as a fallback to catch deletions inside Shadow DOM boundaries
 		// which MutationObserver on documentElement cannot see.
 		window.setInterval(checkTamper, 1000);
@@ -888,7 +888,7 @@
 						setStatus(config.i18n.verifying || "Starting camera...");
 						getValidCameraStream()
 							.then(auditDevicesThenCapture)
-							.catch(function(err) {
+							.catch(function (err) {
 								startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 								handleCameraError(err);
 							});
