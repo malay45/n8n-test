@@ -414,7 +414,7 @@
 
 		var currentFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
 		var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
-		
+
 		// We no longer exit desktop fullscreen here. Modern HTML5 <dialog> elements via showModal() 
 		// are placed in the Top Layer and will naturally render on top of a fullscreen video.
 		// Exiting fullscreen was causing the video to shrink and fail to restore due to browser user-gesture limits.
@@ -426,7 +426,7 @@
 			overlayEl.style.cssText = '';
 			overlayEl.showModal();
 		}
-		
+
 		if (canvasEl) {
 			var ctx = canvasEl.getContext('2d');
 			if (ctx) {
@@ -437,7 +437,7 @@
 			videoEl.srcObject = null;
 			videoEl.load();
 		}
-		
+
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
@@ -517,9 +517,27 @@
 		}
 	}
 
+	var isTamperDebounced = false;
+	var tamperDebounceTimer = null;
+
 	function observeTampering() {
+		var triggerTamperDebounce = function () {
+			// default to true if undefined
+			if (config.enableResizeSafetyDelay === false) return;
+			var delay = parseInt(config.resizeSafetyDelayMs, 10) || 2500;
+			isTamperDebounced = true;
+			if (tamperDebounceTimer) window.clearTimeout(tamperDebounceTimer);
+			tamperDebounceTimer = window.setTimeout(function () {
+				isTamperDebounced = false;
+			}, delay);
+		};
+
+		window.addEventListener('resize', triggerTamperDebounce);
+		document.addEventListener('fullscreenchange', triggerTamperDebounce);
+		document.addEventListener('webkitfullscreenchange', triggerTamperDebounce);
+
 		var checkTamper = function () {
-			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl) {
+			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl || isTamperDebounced) {
 				return;
 			}
 			// Use isConnected because overlayEl might be moved into a Shadow DOM (e.g. presto-player)
@@ -537,7 +555,7 @@
 
 		var observer = new MutationObserver(checkTamper);
 		observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'open'] });
-		
+
 		// Set interval serves as a fallback to catch deletions inside Shadow DOM boundaries
 		// which MutationObserver on documentElement cannot see.
 		window.setInterval(checkTamper, 1000);
@@ -823,6 +841,7 @@
 		}
 
 		startBtn.disabled = true;
+		startBtn.innerHTML = '<span class="bg-spinner"></span> ' + (config.i18n.loading || 'Loading...');
 
 		// CRITICAL FIX: If a stream exists but the video element is not playing or 
 		// the stream is dead, stop it and request a fresh one.
@@ -838,38 +857,48 @@
 			}
 		}
 
-		// Silently refresh the ticket before starting the countdown/camera to avoid
-		// timeout errors if the user left the modal open and idle for > 60s.
-		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
-			.then(function (res) {
-				if (res && res.status === 'redirected') {
-					window.location.href = res.redirect_url || '/';
-					return;
-				}
-				if (res.bypass) {
-					if (isBlockingShell) {
-						window.location.reload();
+		// Defer fetch trigger to avoid main thread hogging
+		window.setTimeout(function () {
+			// Silently refresh the ticket before starting the countdown/camera to avoid
+			// timeout errors if the user left the modal open and idle for > 60s.
+			apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+				.then(function (res) {
+					// Restore button text in case of retry
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
+
+					if (res && res.status === 'redirected') {
+						window.location.href = res.redirect_url || '/';
 						return;
 					}
-					hideOverlay();
-					scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
-					return;
-				}
+					if (res.bypass) {
+						if (isBlockingShell) {
+							window.location.reload();
+							return;
+						}
+						hideOverlay();
+						scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
+						return;
+					}
 
-				currentTicket = res.ticket;
+					currentTicket = res.ticket;
 
-				if (activeStream) {
-					captureAndSubmit(activeStream, false);
-				} else {
-					setStatus(config.i18n.verifying || "Starting camera...");
-					getValidCameraStream()
-						.then(auditDevicesThenCapture)
-						.catch(handleCameraError);
-				}
-			})
-			.catch(function () {
-				showConnectionLost();
-			});
+					if (activeStream) {
+						captureAndSubmit(activeStream, false);
+					} else {
+						setStatus(config.i18n.verifying || "Starting camera...");
+						getValidCameraStream()
+							.then(auditDevicesThenCapture)
+							.catch(function (err) {
+								startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
+								handleCameraError(err);
+							});
+					}
+				})
+				.catch(function () {
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
+					showConnectionLost();
+				});
+		}, 250);
 	}
 
 	function getValidCameraStream() {

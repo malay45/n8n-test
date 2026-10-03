@@ -374,6 +374,77 @@ class BG_Logs
 			return;
 		}
 
+		$current_time = current_datetime();
+		$m = (int) $current_time->format('i');
+		$h = (int) $current_time->format('H');
+		$d = (int) $current_time->format('d');
+		$mon = (int) $current_time->format('m');
+		$y = (int) $current_time->format('Y');
+		$last_day = (int) $current_time->format('t');
+
+		$should_run = false;
+		$block_id = '';
+
+		if ( '15m' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h . '-' . floor( $m / 15 );
+		} elseif ( '1h' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h;
+		} elseif ( '1' === $retention ) {
+			$should_run = true;
+			$block_id = $y . '-' . $mon . '-' . $d;
+		} elseif ( '30' === $retention ) {
+			if ( $d === $last_day ) {
+				$should_run = true;
+				$block_id = $y . '-' . $mon;
+			}
+		} elseif ( '90' === $retention ) {
+			if ( $d === $last_day && in_array( $mon, array( 3, 6, 9, 12 ), true ) ) {
+				$should_run = true;
+				$block_id = $y . '-q' . ceil( $mon / 3 );
+			}
+		} elseif ( '180' === $retention ) {
+			if ( $d === $last_day && in_array( $mon, array( 6, 12 ), true ) ) {
+				$should_run = true;
+				$block_id = $y . '-h' . ceil( $mon / 6 );
+			}
+		} elseif ( '365' === $retention ) {
+			if ( $d === 31 && $mon === 12 ) {
+				$should_run = true;
+				$block_id = (string) $y;
+			}
+		}
+
+		if ( ! $should_run ) {
+			return; // Not in the active window for execution.
+		}
+
+		global $wpdb;
+		$option_name = 'bg_last_cron_block_' . $retention;
+
+		// Try updating if exists (Atomic lock)
+		$updated = $wpdb->query( $wpdb->prepare(
+			"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value != %s",
+			$block_id,
+			$option_name,
+			$block_id
+		) );
+
+		// Try inserting if it doesn't exist
+		if ( ! $updated ) {
+			$existing = get_option( $option_name, false );
+			if ( $existing === false ) {
+				// Doesn't exist, insert it
+				$added = add_option( $option_name, $block_id, '', 'no' );
+				if ( ! $added ) {
+					return; // Failed to acquire lock (already running)
+				}
+			} else {
+				return; // Already run for this block
+			}
+		}
+
 		$sub_day_units = array(
 			'15m' => 15 * MINUTE_IN_SECONDS,
 			'1h'  => HOUR_IN_SECONDS,

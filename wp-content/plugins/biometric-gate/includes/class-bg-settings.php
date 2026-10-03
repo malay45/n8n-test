@@ -71,6 +71,8 @@ class BG_Settings {
 			'blocked_keys_custom'      => '',
 			'force_native_ios'         => false,
 			'bypass_face_scan'         => false,
+			'enable_resize_safety_delay' => true,
+			'resize_safety_delay_ms'     => 2500,
 		);
 	}
 
@@ -141,6 +143,9 @@ class BG_Settings {
 				__( 'Scan Frequency Threshold (Seconds) must be a positive integer.', 'biometric-gate' )
 			);
 		}
+
+		$clean['enable_resize_safety_delay'] = isset( $input['enable_resize_safety_delay'] ) && $input['enable_resize_safety_delay'];
+		$clean['resize_safety_delay_ms']     = isset( $input['resize_safety_delay_ms'] ) ? absint( $input['resize_safety_delay_ms'] ) : 2500;
 
 		if ( $guard < 1 ) {
 			return new WP_Error(
