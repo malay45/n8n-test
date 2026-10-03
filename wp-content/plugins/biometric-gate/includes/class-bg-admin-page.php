@@ -230,6 +230,8 @@ class BG_Admin_Page {
 				'blocked_keys_custom' => isset( $_POST['blocked_keys_custom'] ) ? wp_unslash( $_POST['blocked_keys_custom'] ) : '',
 				'force_native_ios' => isset( $_POST['force_native_ios'] ),
 				'bypass_face_scan' => isset( $_POST['bypass_face_scan'] ),
+				'enable_resize_safety_delay' => isset( $_POST['enable_resize_safety_delay'] ),
+				'resize_safety_delay_ms'     => isset( $_POST['resize_safety_delay_ms'] ) ? wp_unslash( $_POST['resize_safety_delay_ms'] ) : '',
 			);
 
 			$clean = BG_Settings::sanitize( $input );
