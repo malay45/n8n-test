@@ -72,8 +72,13 @@ class BG_Session {
 	}
 
 	/**
-	 * Spec #3's "rolling validation guard window": true when the user scanned recently enough
-	 * that a brand-new camera scan can be gracefully skipped.
+	 * Not currently used to gate whether a scan is required — see BG_Content_Guard and
+	 * scan_start(), which both use has_valid_session() (the full scan threshold) for that,
+	 * after a QA regression traced to this shorter window being used there instead collapsed
+	 * the effective session length for anyone navigating between pages. Kept as a distinct,
+	 * tighter check (admin-enforced to be shorter than the scan threshold) for any future use
+	 * that specifically needs a short "just scanned a moment ago" window rather than the full
+	 * session TTL.
 	 *
 	 * @param int $user_id
 	 * @return bool

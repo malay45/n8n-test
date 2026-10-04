@@ -54,7 +54,7 @@ class BG_Frontend {
 				'restUrl'          => esc_url_raw( rest_url( BG_REST_NAMESPACE ) ),
 				'pluginUrl'        => esc_url_raw( BG_PLUGIN_URL ),
 				'nonce'            => wp_create_nonce( 'wp_rest' ),
-				'hasValidSession'  => BG_Session::is_within_guard_window( $user_id ),
+				'hasValidSession'  => BG_Session::has_valid_session( $user_id ),
 				'hasEnrollment'    => BG_Enrollment::has_enrollment( $user_id ),
 				'pageTitle'        => wp_strip_all_tags( get_the_title() ? get_the_title() : wp_get_document_title() ),
 				'pageUrl'          => home_url( BG_Route_Matcher::current_path() ),

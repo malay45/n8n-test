@@ -336,16 +336,25 @@ class BG_Enrollment {
 	 *
 	 * Confirmed against PixLab's own endpoint docs (pixlab.io/endpoints/facedetect and
 	 * /endpoints/crop) after live-credential testing kept returning "no face detected" for
-	 * every upload: both endpoints require a genuine multipart/form-data POST with the raw
-	 * image bytes under the `img` field for a direct app upload — sending the image as a
-	 * base64 string inside an application/x-www-form-urlencoded field (the previous
-	 * implementation) isn't a documented input format, which is why PixLab was reading it as
-	 * an empty/unmapped image and always returning zero faces. Also fixed: crop's rectangle
-	 * parameters are named `x`/`y` (not `left`/`top`, which is only how facedetect's *response*
-	 * labels them) — a second, separate mismatch that would have 422'd even with multipart
-	 * fixed. Using crop's `blob=true` option returns the cropped binary directly, which also
-	 * removes a second network round-trip (and its own failure point) that the previous
-	 * implementation needed to fetch the output from a returned link.
+	 * every upload: both endpoints require a genuine multipart/form-data POST for a direct app
+	 * upload — sending the image as a base64 string inside an application/x-www-form-urlencoded
+	 * field (the original implementation) isn't a documented input format, which is why PixLab
+	 * was reading it as an empty/unmapped image and always returning zero faces.
+	 *
+	 * Round 2 (live PixLab trial keys still returned "no face detected" on every upload even
+	 * after switching to real multipart): the raw file part was still being posted under the
+	 * field name `img`, matching the *string* (URL/base64) parameter's name — but PixLab's own
+	 * reference PHP client (github.com/symisc/pixlab-php) shows its post()-with-file-upload path
+	 * always attaches the binary under a field literally named `file` instead, reserving `img`
+	 * for the URL/base64 string form. Posting the binary under `img` meant PixLab's server never
+	 * found a file in the field it actually looks for, so it fell back to its empty/unmapped
+	 * path and reported zero faces every time — identical symptom to round 1's bug, different
+	 * root cause. Also fixed: crop's rectangle parameters are named `x`/`y` (not `left`/`top`,
+	 * which is only how facedetect's *response* labels them) — a second, separate mismatch that
+	 * would have 422'd even with the field name fixed. Using crop's `blob=true` option returns
+	 * the cropped binary directly, which also removes a second network round-trip (and its own
+	 * failure point) that the previous implementation needed to fetch the output from a
+	 * returned link.
 	 *
 	 * @param string $image_path
 	 * @return string|WP_Error Raw cropped image binary.
@@ -367,8 +376,8 @@ class BG_Enrollment {
 
 		$detect_multipart = self::build_multipart_body(
 			array(
-				'img' => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
-				'key' => $key,
+				'file' => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
+				'key'  => $key,
 			)
 		);
 
@@ -395,7 +404,7 @@ class BG_Enrollment {
 
 		$crop_multipart = self::build_multipart_body(
 			array(
-				'img'    => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
+				'file'   => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
 				'key'    => $key,
 				'x'      => (string) $face['left'], // crop's *input* params are x/y, not left/top.
 				'y'      => (string) $face['top'],

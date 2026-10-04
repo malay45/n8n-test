@@ -153,7 +153,11 @@ class BG_Rest_Controller {
 			return new WP_REST_Response( array( 'bypass' => true ), 200 );
 		}
 
-		if ( BG_Session::is_within_guard_window( $user_id ) ) {
+		// See BG_Content_Guard::maybe_block() for why this checks the full scan threshold
+		// (has_valid_session) rather than the shorter guard window — they must agree, since a
+		// page that content-guard already let through on "still verified" grounds must not
+		// then have this endpoint immediately demand a brand-new scan anyway.
+		if ( BG_Session::has_valid_session( $user_id ) ) {
 			return new WP_REST_Response(
 				array(
 					'bypass'               => true,

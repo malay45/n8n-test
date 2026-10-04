@@ -281,15 +281,29 @@
 	 * means a hardware/OS play command re-triggers our own pauseAllMedia() instead of actually
 	 * resuming anything; releasing the override on return to visibility restores normal hardware
 	 * media key behavior for the rest of the page once there's nothing left to hide.
+	 *
+	 * A single one-time setActionHandler() call on the 'hidden' transition was not enough — QA
+	 * round 2 still reproduced the bypass. Presto Player itself calls
+	 * navigator.mediaSession.setActionHandler('play', ...) from its own code whenever it thinks
+	 * playback state changes (which our own pauseAllMedia() call, by invoking el.pause(), can
+	 * itself trigger via the element's 'pause'/'play' events), silently clobbering our handler
+	 * after the fact — a handler registered second always wins, there is no stacking. Re-
+	 * asserting our neutralized handler on a short interval for as long as the page stays
+	 * hidden closes that race instead of trusting a single registration to stick.
 	 */
 	function setupMediaSessionGuard() {
 		if (!('mediaSession' in navigator)) {
 			return;
 		}
 
+		var reassertTimer = null;
+
 		var neutralize = function () {
 			try {
 				navigator.mediaSession.setActionHandler('play', function () {
+					pauseAllMedia();
+				});
+				navigator.mediaSession.setActionHandler('pause', function () {
 					pauseAllMedia();
 				});
 				navigator.mediaSession.playbackState = 'paused';
@@ -299,19 +313,28 @@
 		var release = function () {
 			try {
 				navigator.mediaSession.setActionHandler('play', null);
+				navigator.mediaSession.setActionHandler('pause', null);
 			} catch (e) { /* noop */ }
 		};
 
 		document.addEventListener('visibilitychange', function () {
 			if (document.hidden) {
 				neutralize();
+				if (!reassertTimer) {
+					reassertTimer = window.setInterval(neutralize, 500);
+				}
 			} else {
+				if (reassertTimer) {
+					window.clearInterval(reassertTimer);
+					reassertTimer = null;
+				}
 				release();
 			}
 		});
 
 		if (document.hidden) {
 			neutralize();
+			reassertTimer = window.setInterval(neutralize, 500);
 		}
 	}
 
