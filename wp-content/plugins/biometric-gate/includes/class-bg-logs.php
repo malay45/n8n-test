@@ -464,26 +464,35 @@ class BG_Logs
 		$table  = BG_Activator::table_name();
 		$cutoff = gmdate('Y-m-d H:i:s', time() - $window_seconds);
 
-		$has_old_rows = (int) $wpdb->get_var(
-			$wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		);
-
-		// Even if there are no old rows, we continue so that an empty CSV with the 'No user coming'
-		// message is generated, giving the admin a tangible proof that the cron ran.
-
-		// Back up exactly the rows about to be pruned before deleting them.
+		// Back up exactly the rows about to be pruned before deleting them. A short retention
+		// window (15 Minutes/1 Hour) checked this often will very frequently find nothing aged
+		// out yet — that's expected, not a bug: once the window has been running a while, each
+		// cycle only ever has to deal with whatever accumulated since the *previous* cycle
+		// already cleared everything older. (This is also why the CSV only ever contains the
+		// handful of rows that just expired, never "everything currently in the Live Audit
+		// Log" — those are two different things by design: the log view shows all current,
+		// not-yet-expired activity, while this export is specifically the trailing edge being
+		// deleted right now.)
 		$filepath = self::backup_filepath('biometric-logs-retention-prune');
-		self::export_expired_to_csv($filepath, $cutoff);
+		$written  = self::export_expired_to_csv($filepath, $cutoff);
 
-		if (file_exists($filepath) && filesize($filepath) > 0) {
+		if ($written > 0) {
 			$wpdb->query(
 				$wpdb->prepare("DELETE FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 			);
+		} else {
+			// Nothing actually aged out this cycle — don't leave a placeholder "No user
+			// activity" CSV sitting in the Server Document Archive; at a 15-minute cadence
+			// that's up to 96 empty files a day cluttering what should be a list of real backups.
+			@unlink($filepath); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
 	}
 
 	/**
 	 * Same batch-streaming approach as export_to_csv(), scoped to rows older than $cutoff.
+	 *
+	 * @return int Rows actually written (not counting the header) — run_retention_prune() uses
+	 *             this to decide whether to keep the file at all or discard an empty cycle.
 	 */
 	private static function export_expired_to_csv($filepath, $cutoff)
 	{
@@ -496,7 +505,7 @@ class BG_Logs
 
 		$handle     = @fopen($filepath, 'w');
 		if (false === $handle) {
-			return;
+			return 0;
 		}
 
 		fputcsv($handle, array('Timestamp (' . wp_timezone_string() . ')', 'User ID', 'User Full Name', 'Scan Status', 'Confidence Score (%)', 'Page Title', 'Page URL'));
@@ -538,22 +547,9 @@ class BG_Logs
 			unset($rows, $user_ids, $names);
 		} while (true);
 
-		if ( 0 === $written ) {
-			fputcsv(
-				$handle,
-				array(
-					self::format_local_time(current_time('mysql', true)),
-					'',
-					'No user activity during this time.',
-					'',
-					'',
-					'',
-					'',
-				)
-			);
-		}
-
 		fclose($handle);
+
+		return $written;
 	}
 
 	public static function get_export_progress()
