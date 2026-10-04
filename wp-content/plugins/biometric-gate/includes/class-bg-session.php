@@ -72,13 +72,15 @@ class BG_Session {
 	}
 
 	/**
-	 * Not currently used to gate whether a scan is required — see BG_Content_Guard and
-	 * scan_start(), which both use has_valid_session() (the full scan threshold) for that,
-	 * after a QA regression traced to this shorter window being used there instead collapsed
-	 * the effective session length for anyone navigating between pages. Kept as a distinct,
-	 * tighter check (admin-enforced to be shorter than the scan threshold) for any future use
-	 * that specifically needs a short "just scanned a moment ago" window rather than the full
-	 * session TTL.
+	 * The gate for a *fresh page/video entry* (BG_Content_Guard::maybe_block() and
+	 * scan_start()): true when the user scanned recently enough that a brand-new camera scan
+	 * can be gracefully skipped. This is deliberately the shorter guard window, not the full
+	 * scan threshold — confirmed directly with the client (04 Oct round 3) that it exists as
+	 * an anti-frustration grace period only (so switching videos a few seconds after already
+	 * scanning doesn't immediately nag again), and that once this window elapses, a fresh
+	 * entry SHOULD prompt a new scan even if the longer scan threshold hasn't run out yet. A
+	 * round-2 change briefly gated entry on has_valid_session() (the full threshold) instead,
+	 * which the client confirmed was wrong; reverted back to this.
 	 *
 	 * @param int $user_id
 	 * @return bool
@@ -92,8 +94,14 @@ class BG_Session {
 	}
 
 	/**
+	 * True when the user has a currently-valid (unexpired) verification at all, i.e. the full
+	 * scan threshold hasn't elapsed since their last successful scan yet. Not used to gate
+	 * page/video entry (see is_within_guard_window() for that) — this instead paces the
+	 * ongoing same-page interval loop (Trigger B) that bg-gate.js schedules client-side while
+	 * the student stays on one page without navigating.
+	 *
 	 * @param int $user_id
-	 * @return bool True when the user has a currently-valid (unexpired) verification.
+	 * @return bool
 	 */
 	public static function has_valid_session( $user_id ) {
 		return null !== self::seconds_since_last_verification( $user_id );

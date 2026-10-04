@@ -153,11 +153,15 @@ class BG_Rest_Controller {
 			return new WP_REST_Response( array( 'bypass' => true ), 200 );
 		}
 
-		// See BG_Content_Guard::maybe_block() for why this checks the full scan threshold
-		// (has_valid_session) rather than the shorter guard window — they must agree, since a
-		// page that content-guard already let through on "still verified" grounds must not
-		// then have this endpoint immediately demand a brand-new scan anyway.
-		if ( BG_Session::has_valid_session( $user_id ) ) {
+		// See BG_Content_Guard::maybe_block() for why this checks the guard window (the
+		// anti-frustration "just scanned a moment ago" grace period) rather than the longer
+		// scan threshold — they must agree, since a page that content-guard already let
+		// through on this same basis must not then have this endpoint immediately demand a
+		// brand-new scan anyway. Confirmed with the client (04 Oct round 3) that once the
+		// guard window itself elapses, a fresh page/video entry should prompt a new scan even
+		// if the full scan threshold hasn't run out — reverted from a round-2 change that
+		// gated this on has_valid_session() (the full threshold) instead.
+		if ( BG_Session::is_within_guard_window( $user_id ) ) {
 			return new WP_REST_Response(
 				array(
 					'bypass'               => true,
