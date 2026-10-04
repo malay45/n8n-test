@@ -627,17 +627,50 @@
 
 	var isTamperDebounced = false;
 	var tamperDebounceTimer = null;
+	var tamperDebounceDeadline = 0;
 
 	function observeTampering() {
+		/**
+		 * QA (item 5) still reproduced the Mac Chrome/Edge fullscreen-exit false lockout even
+		 * with the fullscreenchange/webkitfullscreenchange listeners in place. One plausible,
+		 * Mac-specific explanation: exiting fullscreen there can fire 'fullscreenchange' before
+		 * the browser finishes its own internal layout/paint work for the transition, and that
+		 * leftover work can itself produce a transient DOM mutation — MutationObserver callbacks
+		 * run as microtasks, same-tick, so checkTamper() could see that mutation before this
+		 * handler has had a chance to arm isTamperDebounced. Deferring the arm step with a
+		 * setTimeout(fn, 0) macrotask lets any in-flight browser layout work for the transition
+		 * finish first. (This is unrelated to display refresh rate — setTimeout's delay is
+		 * wall-clock milliseconds off the system clock, not frames, so it behaves identically on
+		 * a 60Hz or 360Hz monitor.)
+		 *
+		 * The debounce window itself is tracked as an absolute Date.now() deadline rather than
+		 * trusted from a single setTimeout call's own duration, re-armed against that same
+		 * deadline if it fires early: a backgrounded tab can have its timers throttled/delayed by
+		 * the browser, and re-checking against a wall-clock deadline (instead of just accepting
+		 * whenever the timer happens to fire) keeps the flag from clearing before the admin's
+		 * configured delay has genuinely elapsed, without ever clearing it late either.
+		 */
 		var triggerTamperDebounce = function () {
 			// default to true if undefined
 			if (config.enableResizeSafetyDelay === false) return;
 			var delay = parseInt(config.resizeSafetyDelayMs, 10) || 2500;
-			isTamperDebounced = true;
-			if (tamperDebounceTimer) window.clearTimeout(tamperDebounceTimer);
-			tamperDebounceTimer = window.setTimeout(function () {
-				isTamperDebounced = false;
-			}, delay);
+
+			window.setTimeout(function () {
+				isTamperDebounced = true;
+				tamperDebounceDeadline = Date.now() + delay;
+
+				if (tamperDebounceTimer) window.clearTimeout(tamperDebounceTimer);
+
+				var clearWhenDue = function () {
+					var remaining = tamperDebounceDeadline - Date.now();
+					if (remaining > 0) {
+						tamperDebounceTimer = window.setTimeout(clearWhenDue, remaining);
+						return;
+					}
+					isTamperDebounced = false;
+				};
+				tamperDebounceTimer = window.setTimeout(clearWhenDue, delay);
+			}, 0);
 		};
 
 		window.addEventListener('resize', triggerTamperDebounce);
