@@ -332,8 +332,20 @@ class BG_Enrollment {
 	/**
 	 * PixLab facedetect -> crop pipeline: detect the face rectangle in the uploaded ID photo,
 	 * then crop to just that region so the stored reference is a face portrait, not a whole
-	 * passport/ID scan. Images are sent as base64 (never a public URL) since the source is a
-	 * sensitive government ID photo.
+	 * passport/ID scan.
+	 *
+	 * Confirmed against PixLab's own endpoint docs (pixlab.io/endpoints/facedetect and
+	 * /endpoints/crop) after live-credential testing kept returning "no face detected" for
+	 * every upload: both endpoints require a genuine multipart/form-data POST with the raw
+	 * image bytes under the `img` field for a direct app upload — sending the image as a
+	 * base64 string inside an application/x-www-form-urlencoded field (the previous
+	 * implementation) isn't a documented input format, which is why PixLab was reading it as
+	 * an empty/unmapped image and always returning zero faces. Also fixed: crop's rectangle
+	 * parameters are named `x`/`y` (not `left`/`top`, which is only how facedetect's *response*
+	 * labels them) — a second, separate mismatch that would have 422'd even with multipart
+	 * fixed. Using crop's `blob=true` option returns the cropped binary directly, which also
+	 * removes a second network round-trip (and its own failure point) that the previous
+	 * implementation needed to fetch the output from a returned link.
 	 *
 	 * @param string $image_path
 	 * @return string|WP_Error Raw cropped image binary.
@@ -350,16 +362,22 @@ class BG_Enrollment {
 			return new WP_Error( 'bg_read_failed', __( 'Could not read the uploaded image.', 'biometric-gate' ) );
 		}
 
-		$b64 = base64_encode( $image_data );
+		$image_info = @getimagesizefromstring( $image_data ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		$mime_type  = ( $image_info && ! empty( $image_info['mime'] ) ) ? $image_info['mime'] : 'image/jpeg';
+
+		$detect_multipart = self::build_multipart_body(
+			array(
+				'img' => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
+				'key' => $key,
+			)
+		);
 
 		$detect_response = wp_remote_post(
 			'https://api.pixlab.io/facedetect',
 			array(
-				'timeout' => 15,
-				'body'    => array(
-					'img' => $b64,
-					'key' => $key,
-				),
+				'timeout' => 30,
+				'headers' => array( 'Content-Type' => 'multipart/form-data; boundary=' . $detect_multipart['boundary'] ),
+				'body'    => $detect_multipart['body'],
 			)
 		);
 
@@ -373,20 +391,26 @@ class BG_Enrollment {
 			return new WP_Error( 'bg_no_face_detected', __( 'No face could be detected in the uploaded ID photo.', 'biometric-gate' ) );
 		}
 
-		$face = $detect_body['faces'][0];
+		$face = $detect_body['faces'][0]; // facedetect's response labels these left/top/width/height.
+
+		$crop_multipart = self::build_multipart_body(
+			array(
+				'img'    => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
+				'key'    => $key,
+				'x'      => (string) $face['left'], // crop's *input* params are x/y, not left/top.
+				'y'      => (string) $face['top'],
+				'width'  => (string) $face['width'],
+				'height' => (string) $face['height'],
+				'blob'   => 'true', // Return the cropped binary directly instead of a {link:...} URL to fetch separately.
+			)
+		);
 
 		$crop_response = wp_remote_post(
 			'https://api.pixlab.io/crop',
 			array(
-				'timeout' => 15,
-				'body'    => array(
-					'img'    => $b64,
-					'key'    => $key,
-					'left'   => $face['left'],
-					'top'    => $face['top'],
-					'width'  => $face['width'],
-					'height' => $face['height'],
-				),
+				'timeout' => 30,
+				'headers' => array( 'Content-Type' => 'multipart/form-data; boundary=' . $crop_multipart['boundary'] ),
+				'body'    => $crop_multipart['body'],
 			)
 		);
 
@@ -394,18 +418,46 @@ class BG_Enrollment {
 			return new WP_Error( 'bg_pixlab_crop_unreachable', __( 'Could not reach the crop service.', 'biometric-gate' ) );
 		}
 
-		$crop_body = json_decode( wp_remote_retrieve_body( $crop_response ), true );
+		$cropped_binary = wp_remote_retrieve_body( $crop_response );
 
-		if ( empty( $crop_body['link'] ) ) {
-			return new WP_Error( 'bg_crop_failed', __( 'The crop service did not return a cropped image.', 'biometric-gate' ) );
+		if ( '' === $cropped_binary || false === @getimagesizefromstring( $cropped_binary ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			return new WP_Error( 'bg_crop_failed', __( 'The crop service did not return a usable cropped image.', 'biometric-gate' ) );
 		}
 
-		$cropped_response = wp_remote_get( $crop_body['link'], array( 'timeout' => 15 ) );
-		if ( is_wp_error( $cropped_response ) ) {
-			return new WP_Error( 'bg_crop_fetch_failed', __( 'Could not retrieve the cropped portrait.', 'biometric-gate' ) );
+		return $cropped_binary;
+	}
+
+	/**
+	 * Hand-built multipart/form-data body: WP_Http has no automatic array-to-multipart
+	 * conversion for binary file fields, so a direct upload (as opposed to a urlencoded body)
+	 * needs its boundary and part framing constructed explicitly.
+	 *
+	 * @param array<string,string|array{filename:string,content:string,mime:string}> $fields
+	 * @return array{boundary:string,body:string}
+	 */
+	private static function build_multipart_body( array $fields ) {
+		$boundary = wp_generate_password( 24, false );
+		$body     = '';
+
+		foreach ( $fields as $name => $value ) {
+			$body .= '--' . $boundary . "\r\n";
+
+			if ( is_array( $value ) ) {
+				$body .= 'Content-Disposition: form-data; name="' . $name . '"; filename="' . $value['filename'] . '"' . "\r\n";
+				$body .= 'Content-Type: ' . $value['mime'] . "\r\n\r\n";
+				$body .= $value['content'] . "\r\n";
+			} else {
+				$body .= 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n";
+				$body .= $value . "\r\n";
+			}
 		}
 
-		return wp_remote_retrieve_body( $cropped_response );
+		$body .= '--' . $boundary . "--\r\n";
+
+		return array(
+			'boundary' => $boundary,
+			'body'     => $body,
+		);
 	}
 
 	// ---------------------------------------------------------------------

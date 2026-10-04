@@ -60,7 +60,17 @@
 	var CAPTURE_WIDTH = 480;
 	var CAPTURE_HEIGHT = 600;
 
-	var DARKNESS_THRESHOLD = 10; // Bumped slightly to 10, but 40 is too strict.
+	// Tuning history: started at 40, which false-positived "too dark" in acceptable room
+	// lighting; dropped to 10 to fix that, which QA then found too lenient — a genuinely poorly
+	// lit room on Windows Chrome/Edge no longer tripped the warning at all. 10 is close enough
+	// to pitch-black that most webcams' own auto-exposure/gain compensation (which varies by
+	// platform/driver — this is plain canvas pixel math with no OS-specific branch, so the
+	// difference QA saw is almost certainly the camera hardware, not this code) will still read
+	// well above it even in dim rooms. Splitting the difference at 25 based on both rounds of
+	// real-world feedback; this is a tuning compromise, not a provably "correct" value — there
+	// isn't one single threshold that is right for every camera/room combination in software
+	// alone, so re-verify across the device matrix after this change too.
+	var DARKNESS_THRESHOLD = 25;
 	var BRIGHTNESS_THRESHOLD = 235; // Overexposure/glare ceiling on the same 0-255 scale.
 	var DEVTOOLS_SIZE_THRESHOLD = 160; // px delta between outer/inner window — heuristic, imperfect by nature.
 	var MEDIA_RESCAN_INTERVAL_MS = 500; // Re-sweep for newly-added/reinitialized players while locked out.
@@ -96,16 +106,37 @@
 		}, 500);
 
 		startStatusHeartbeat();
+		setupMediaSessionGuard();
 
-		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
-		// Point 1 Fix: Strict asynchronous throttling during the first 15 seconds of page load.
-		// If the user is already verified (!isBlockingShell), defer the heavy background scan
-		// check so Presto Player and YouTube assets get full priority in Chrome's connection queue.
-		if (!isBlockingShell) {
-			window.setTimeout(runScanCycle, 15000);
-		} else {
-			runScanCycle();
-		}
+		// The initial runScanCycle() call used to be deferred 15s on a normal (non-blocking-
+		// shell) page load to let Presto/YouTube assets win the browser's initial connection
+		// queue — but this is the call that resolves the Consecutive Scan Bypass Guard Window
+		// (Trigger A), which spec #3 requires to fire "the absolute microsecond" a protected
+		// page is entered, and which the server's seconds_until_rescan math assumes runs at
+		// entry. Deferring it let up to 15s of the guard/threshold budget elapse unobserved
+		// before the client ever re-synced with the server, so scheduleNextCheck() could end up
+		// scheduling an almost-immediate re-check right after the defer — exactly the
+		// "persistent clock loop becomes misaligned... premature face scan popup" regression
+		// reported in QA. The original connection-queue concern was really about the repeating
+		// /session/status heartbeat (which has its own independent, already-unchanged throttle
+		// in runStatusHeartbeatTick), not this one-time, small, high-priority POST — so this
+		// call is no longer deferred at all.
+		runScanCycle();
+
+		// Firefox's (and Safari's) back/forward cache can resume this entire page — DOM and
+		// running JS state alike, including any locally-held "already verified" assumption —
+		// straight from memory on a back/forward navigation, without re-running init() or
+		// making any network request at all. That is exactly the "pulling an authenticated
+		// session token from local RAM cache instead of fetching the updated row from the
+		// server" behavior QA reported, and it reproducing specifically on Firefox lines up:
+		// Firefox has historically the most aggressive bfcache of the major engines. Forcing a
+		// fresh, server-authoritative check on bfcache restore closes that gap regardless of
+		// how stale the resumed in-memory state is.
+		window.addEventListener('pageshow', function (e) {
+			if (e.persisted) {
+				runScanCycle();
+			}
+		});
 
 		// Deferred, off the critical page-load path: mutating a YouTube iframe's src (to add
 		// enablejsapi=1) forces the browser to discard and reload that embed from scratch —
@@ -239,6 +270,49 @@
 
 	function killSwitchEnabled(type) {
 		return !!(config.killSwitchesEnabled && config.killSwitchesEnabled[type]);
+	}
+
+	/**
+	 * onVisibilityChange()/onWindowBlur() already pause all media on minimize/tab-switch, but a
+	 * physical hardware Play/Pause media key (or an OS media-control overlay) talks to the page
+	 * through the separate Media Session API, not through anything that respects a plain
+	 * .pause() call — QA reported this forces Presto Player to resume audio while the window is
+	 * minimized and completely out of view. Overriding the 'play' action handler while hidden
+	 * means a hardware/OS play command re-triggers our own pauseAllMedia() instead of actually
+	 * resuming anything; releasing the override on return to visibility restores normal hardware
+	 * media key behavior for the rest of the page once there's nothing left to hide.
+	 */
+	function setupMediaSessionGuard() {
+		if (!('mediaSession' in navigator)) {
+			return;
+		}
+
+		var neutralize = function () {
+			try {
+				navigator.mediaSession.setActionHandler('play', function () {
+					pauseAllMedia();
+				});
+				navigator.mediaSession.playbackState = 'paused';
+			} catch (e) { /* Not every browser supports every action handler — best effort. */ }
+		};
+
+		var release = function () {
+			try {
+				navigator.mediaSession.setActionHandler('play', null);
+			} catch (e) { /* noop */ }
+		};
+
+		document.addEventListener('visibilitychange', function () {
+			if (document.hidden) {
+				neutralize();
+			} else {
+				release();
+			}
+		});
+
+		if (document.hidden) {
+			neutralize();
+		}
 	}
 
 	function setupIphoneVideoOverride() {
@@ -540,15 +614,27 @@
 			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl || isTamperDebounced) {
 				return;
 			}
-			// Use isConnected because overlayEl might be moved into a Shadow DOM (e.g. presto-player)
-			// to preserve fullscreen layout in Firefox, which causes document.body.contains to fail.
-			var stillPresent = overlayEl.isConnected;
-			var cardPresent = !!overlayEl.querySelector('.bg-gate-card');
-			var stillVisible = stillPresent && overlayEl.open && 'none' !== window.getComputedStyle(overlayEl).display;
+
+			// Looked up fresh by ID on every check rather than trusting only the closure-captured
+			// overlayEl reference: QA found Firefox (Gecko) specifically failing to lock out when
+			// "Bypass Face Scan Overlay" left the overlay closed-but-present, while Chrome/Edge
+			// caught the same deletion correctly. A stale JS reference could in principle stay
+			// "connected" per one engine's bookkeeping after DevTools replaces/detaches the live
+			// node a different way than another engine does; re-resolving by ID sidesteps that
+			// class of engine-specific reference-identity difference entirely rather than
+			// guessing at Gecko's exact internal behavior.
+			var liveEl = document.getElementById('bg-gate-overlay') || overlayEl;
+
+			// Use isConnected because the overlay might be moved into a Shadow DOM (e.g.
+			// presto-player) to preserve fullscreen layout in Firefox, which causes
+			// document.body.contains to fail.
+			var stillPresent = !!liveEl && liveEl.isConnected;
+			var cardPresent = stillPresent && !!liveEl.querySelector('.bg-gate-card');
+			var stillVisible = stillPresent && liveEl.open && 'none' !== window.getComputedStyle(liveEl).display;
 
 			if (!stillPresent || !cardPresent) {
 				killSwitch('overlay_tampered');
-			} else if (overlayEl.open && !stillVisible) {
+			} else if (liveEl.open && !stillVisible) {
 				killSwitch('overlay_tampered');
 			}
 		};
