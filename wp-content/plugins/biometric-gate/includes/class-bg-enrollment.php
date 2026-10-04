@@ -36,7 +36,13 @@ class BG_Enrollment {
 	const UPLOAD_TYPE_OFFICIAL_ID    = 'official_id';
 	const UPLOAD_TYPE_STANDARD_IMAGE = 'standard_image';
 
-	const MIN_DIMENSION_PX = 600; // Reject uploads smaller than this on either side.
+	// 600 (matching MAX_DIMENSION_PX, i.e. requiring an upload already at the final output size)
+	// rejected most real-world photos outright — client QA found typical webcam/phone portraits
+	// and ID scans commonly land well under that on their shorter side, forcing admins to
+	// upscale a photo just to clear this check, which adds no real detail and defeats the
+	// point of a quality floor. 200px is still enough resolution for PixLab/FaceIO to work with
+	// reliably while accepting the overwhelming majority of ordinary photos unmodified.
+	const MIN_DIMENSION_PX = 200; // Reject uploads smaller than this on either side.
 	const MAX_DIMENSION_PX = 600; // Downscale (never upscale) larger uploads to fit this bound.
 	const JPEG_QUALITY     = 80;
 
@@ -394,7 +400,28 @@ class BG_Enrollment {
 			return new WP_Error( 'bg_pixlab_unreachable', __( 'Could not reach the face-detection service.', 'biometric-gate' ) );
 		}
 
-		$detect_body = json_decode( wp_remote_retrieve_body( $detect_response ), true );
+		$detect_status = wp_remote_retrieve_response_code( $detect_response );
+		$detect_body   = json_decode( wp_remote_retrieve_body( $detect_response ), true );
+
+		// A genuine PixLab-side error (bad/expired key, quota exceeded, malformed request, etc.)
+		// was previously indistinguishable from a real "zero faces found" result — both left
+		// $detect_body['faces'] empty, so every failure surfaced the same generic "No face could
+		// be detected" message regardless of its actual cause, making this impossible to
+		// diagnose from the error text alone. Surface PixLab's own error (or the raw HTTP status
+		// if it didn't send one) before falling back to the "no face" interpretation.
+		if ( is_array( $detect_body ) && ! empty( $detect_body['error'] ) ) {
+			return new WP_Error(
+				'bg_pixlab_api_error',
+				sprintf( /* translators: %s: raw error message returned by PixLab */ __( 'PixLab face-detection error: %s', 'biometric-gate' ), $detect_body['error'] )
+			);
+		}
+
+		if ( $detect_status >= 400 ) {
+			return new WP_Error(
+				'bg_pixlab_api_error',
+				sprintf( /* translators: %d: HTTP status code */ __( 'PixLab face-detection service returned an error (HTTP %d).', 'biometric-gate' ), $detect_status )
+			);
+		}
 
 		if ( empty( $detect_body['faces'][0] ) ) {
 			return new WP_Error( 'bg_no_face_detected', __( 'No face could be detected in the uploaded ID photo.', 'biometric-gate' ) );
@@ -430,6 +457,16 @@ class BG_Enrollment {
 		$cropped_binary = wp_remote_retrieve_body( $crop_response );
 
 		if ( '' === $cropped_binary || false === @getimagesizefromstring( $cropped_binary ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			// On failure PixLab returns a JSON error body, not image bytes, so it never passes
+			// getimagesizefromstring() above — decode it to surface PixLab's own message instead
+			// of the generic fallback below, same reasoning as the facedetect error handling.
+			$maybe_json = json_decode( $cropped_binary, true );
+			if ( is_array( $maybe_json ) && ! empty( $maybe_json['error'] ) ) {
+				return new WP_Error(
+					'bg_pixlab_api_error',
+					sprintf( /* translators: %s: raw error message returned by PixLab */ __( 'PixLab crop error: %s', 'biometric-gate' ), $maybe_json['error'] )
+				);
+			}
 			return new WP_Error( 'bg_crop_failed', __( 'The crop service did not return a usable cropped image.', 'biometric-gate' ) );
 		}
 
@@ -493,7 +530,12 @@ class BG_Enrollment {
 		if ( $width < self::MIN_DIMENSION_PX || $height < self::MIN_DIMENSION_PX ) {
 			return new WP_Error(
 				'bg_resolution_too_small',
-				__( 'Upload Failed: The image resolution is too small. Files must be at least 600x600 pixels to ensure accurate biometric mapping.', 'biometric-gate' )
+				sprintf(
+					/* translators: %1$d: minimum width in pixels, %2$d: minimum height in pixels */
+					__( 'Upload Failed: The image resolution is too small. Files must be at least %1$dx%2$d pixels to ensure accurate biometric mapping.', 'biometric-gate' ),
+					self::MIN_DIMENSION_PX,
+					self::MIN_DIMENSION_PX
+				)
 			);
 		}
 
