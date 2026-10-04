@@ -43,11 +43,18 @@ class BG_Content_Guard {
 			exit;
 		}
 
-		// The guard window (not the longer scan threshold) governs whether a *fresh page
-		// request* needs a new scan (spec #3's Trigger A: "repetitive page entry scans" are
-		// what the guard window skips). The scan threshold instead paces the ongoing
-		// client-side interval loop on a page that's already open — see BG_Frontend.
-		if ( BG_Session::is_bypassed( $user_id ) || BG_Session::is_within_guard_window( $user_id ) ) {
+		// QA regression (04 Oct round 2): this used to gate on the shorter guard window
+		// instead of the scan threshold, so a user who simply navigated between pages would
+		// get forced into a brand-new full scan the moment the *guard window* elapsed (e.g.
+		// 30s) even though their verification was still valid for the full scan-threshold
+		// duration (e.g. 60s) — collapsing the effective session length down to the guard
+		// window on any page with normal navigation. The scan threshold is the one true
+		// "is this user still verified" duration everywhere (both for this page-entry check
+		// and for the ongoing client-side interval loop in bg-gate.js); has_valid_session()
+		// is backed by the same transient mark_verified() writes with that same TTL, so this
+		// is exactly "has the full scan-threshold window elapsed since the last successful
+		// verification yet?" — matching what the client's QA report expects.
+		if ( BG_Session::is_bypassed( $user_id ) || BG_Session::has_valid_session( $user_id ) ) {
 			return;
 		}
 
