@@ -283,13 +283,23 @@
 	 * media key behavior for the rest of the page once there's nothing left to hide.
 	 *
 	 * A single one-time setActionHandler() call on the 'hidden' transition was not enough — QA
-	 * round 2 still reproduced the bypass. Presto Player itself calls
+	 * round 2 still reproduced the bypass even with that in place. Presto Player itself calls
 	 * navigator.mediaSession.setActionHandler('play', ...) from its own code whenever it thinks
 	 * playback state changes (which our own pauseAllMedia() call, by invoking el.pause(), can
 	 * itself trigger via the element's 'pause'/'play' events), silently clobbering our handler
 	 * after the fact — a handler registered second always wins, there is no stacking. Re-
 	 * asserting our neutralized handler on a short interval for as long as the page stays
-	 * hidden closes that race instead of trusting a single registration to stick.
+	 * hidden closes most of that race, but round 3 QA still reproduced it occasionally, which
+	 * means the hardware key can win a given 500ms slice before our handler re-wins the next
+	 * one — the Media Session override alone is a best-effort deterrent, not a guarantee, since
+	 * this plugin cannot see or control Presto Player's internals directly. So this now also
+	 * directly re-calls pauseAllMedia() on that same interval regardless of which handler the
+	 * OS actually invoked — the same brute-force "keep sweeping and pausing" approach already
+	 * used by mediaRescanTimer while the lockout overlay is open, just extended to cover the
+	 * whole time the tab is hidden, not only an active scan. A hardware key that slips past the
+	 * Media Session handler and genuinely resumes playback for a moment gets paused again within
+	 * one interval tick instead of playing on, out of view, for the rest of the time the window
+	 * stays minimized.
 	 */
 	function setupMediaSessionGuard() {
 		if (!('mediaSession' in navigator)) {
@@ -308,6 +318,7 @@
 				});
 				navigator.mediaSession.playbackState = 'paused';
 			} catch (e) { /* Not every browser supports every action handler — best effort. */ }
+			pauseAllMedia();
 		};
 
 		var release = function () {
@@ -321,7 +332,7 @@
 			if (document.hidden) {
 				neutralize();
 				if (!reassertTimer) {
-					reassertTimer = window.setInterval(neutralize, 500);
+					reassertTimer = window.setInterval(neutralize, 250);
 				}
 			} else {
 				if (reassertTimer) {
@@ -334,7 +345,7 @@
 
 		if (document.hidden) {
 			neutralize();
-			reassertTimer = window.setInterval(neutralize, 500);
+			reassertTimer = window.setInterval(neutralize, 250);
 		}
 	}
 
