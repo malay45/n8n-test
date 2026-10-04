@@ -33,14 +33,15 @@ class BG_Logs
 	public static function fallback_cron_prune() {
 		if (false === get_transient('bg_fallback_cron_prune')) {
 			$retention = BG_Settings::get()['retention'];
-			$interval = HOUR_IN_SECONDS;
-			if ( '15m' === $retention ) {
-				$interval = 15 * MINUTE_IN_SECONDS;
-			} elseif ( '1h' === $retention ) {
-				$interval = HOUR_IN_SECONDS;
-			} elseif ( is_numeric( $retention ) && $retention > 0 ) {
-				$interval = $retention * DAY_IN_SECONDS;
-			}
+			// This is only a cheap "don't re-check on every single admin page load" throttle —
+			// run_retention_prune() itself already has its own per-day (or per-hour/15-minute)
+			// block_id lock that's the real guard against doing the work twice. It must never be
+			// set to anything close to the configured retention window itself: that used to scale
+			// this interval up to $retention days (e.g. 365 days for a 1-year retention setting),
+			// which meant this fallback wouldn't even attempt its first check for up to a year on
+			// a site with broken WP-Cron — silently defeating the very daily cadence
+			// run_retention_prune() relies on to keep the live audit log trimmed.
+			$interval = ( '15m' === $retention ) ? 15 * MINUTE_IN_SECONDS : HOUR_IN_SECONDS;
 			set_transient('bg_fallback_cron_prune', 1, $interval);
 			self::run_retention_prune();
 		}
@@ -365,6 +366,15 @@ class BG_Logs
 	 * Architecture"). "Keep Forever" disables this entirely. '15m'/'1h' are the two fast-testing
 	 * options (client QA item 9) — see BG_Activator::register_cron_schedules() for why the cron
 	 * itself needed a finer interval than 'daily' for those to be observable at all.
+	 *
+	 * Every day-based window (1/30/90/180/365 days) prunes on the same daily cadence, each tick
+	 * trimming whatever has aged past its own configured window. A calendar-boundary cadence
+	 * (only on the last day of the month/quarter/half-year, or Dec 31) used to gate the three
+	 * longer windows here instead, which meant up to roughly *two* retention periods' worth of
+	 * rows could sit in the live audit log before the very first export/purge ever ran — for
+	 * 365-day retention specifically, nothing exported until Dec 31, so an entire extra year
+	 * could accumulate live first. Daily pruning keeps each window's live table reliably down to
+	 * ~its configured size at all times instead of only once per calendar period.
 	 */
 	public static function run_retention_prune()
 	{
@@ -380,7 +390,6 @@ class BG_Logs
 		$d = (int) $current_time->format('d');
 		$mon = (int) $current_time->format('m');
 		$y = (int) $current_time->format('Y');
-		$last_day = (int) $current_time->format('t');
 
 		$should_run = false;
 		$block_id = '';
@@ -391,29 +400,18 @@ class BG_Logs
 		} elseif ( '1h' === $retention ) {
 			$should_run = true;
 			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h;
-		} elseif ( '1' === $retention ) {
+		} elseif ( in_array( $retention, array( '1', '30', '90', '180', '365' ), true ) ) {
+			// All day-based windows prune on the same daily cadence, each trimming whatever has
+			// now aged past its own window — see the docblock above: a calendar-boundary cadence
+			// (only on the last day of the month/quarter/half-year, or Dec 31) used to gate the
+			// longer windows here, which meant up to roughly *two* retention periods' worth of
+			// rows could sit live in the audit log before the very first export/purge ever ran
+			// (e.g. with 365-day retention, nothing was exported until Dec 31, so an entire extra
+			// year could accumulate first) — exactly the backlog the client's QA report traced.
+			// A plain daily tick, like the pre-existing '1'-day option already used, keeps every
+			// window's live table reliably down to ~its configured size at all times instead.
 			$should_run = true;
 			$block_id = $y . '-' . $mon . '-' . $d;
-		} elseif ( '30' === $retention ) {
-			if ( $d === $last_day ) {
-				$should_run = true;
-				$block_id = $y . '-' . $mon;
-			}
-		} elseif ( '90' === $retention ) {
-			if ( $d === $last_day && in_array( $mon, array( 3, 6, 9, 12 ), true ) ) {
-				$should_run = true;
-				$block_id = $y . '-q' . ceil( $mon / 3 );
-			}
-		} elseif ( '180' === $retention ) {
-			if ( $d === $last_day && in_array( $mon, array( 6, 12 ), true ) ) {
-				$should_run = true;
-				$block_id = $y . '-h' . ceil( $mon / 6 );
-			}
-		} elseif ( '365' === $retention ) {
-			if ( $d === 31 && $mon === 12 ) {
-				$should_run = true;
-				$block_id = (string) $y;
-			}
 		}
 
 		if ( ! $should_run ) {
