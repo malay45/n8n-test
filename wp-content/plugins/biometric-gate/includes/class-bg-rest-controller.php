@@ -29,8 +29,9 @@ class BG_Rest_Controller {
 	}
 
 	public static function force_zero_cache( $served, $result, $request, $server ) {
-		if ( strpos( $request->get_route(), '/session/status' ) !== false ) {
+		if ( strpos( $request->get_route(), BG_REST_NAMESPACE ) !== false ) {
 			// Bypass Cloudways/Nginx/Breeze caching layers at the lowest PHP level
+			// for all validation and operational endpoints
 			header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
 			header( 'Pragma: no-cache', true );
 			header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );

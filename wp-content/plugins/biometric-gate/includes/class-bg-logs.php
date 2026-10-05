@@ -462,27 +462,20 @@ class BG_Logs
 		$table  = BG_Activator::table_name();
 		$cutoff = gmdate('Y-m-d H:i:s', time() - $window_seconds);
 
-		// Back up exactly the rows about to be pruned before deleting them. A short retention
-		// window (15 Minutes/1 Hour) checked this often will very frequently find nothing aged
-		// out yet — that's expected, not a bug: once the window has been running a while, each
-		// cycle only ever has to deal with whatever accumulated since the *previous* cycle
-		// already cleared everything older. (This is also why the CSV only ever contains the
-		// handful of rows that just expired, never "everything currently in the Live Audit
-		// Log" — those are two different things by design: the log view shows all current,
-		// not-yet-expired activity, while this export is specifically the trailing edge being
-		// deleted right now.)
-		$filepath = self::backup_filepath('biometric-logs-retention-prune');
-		$written  = self::export_expired_to_csv($filepath, $cutoff);
+		// Query first to avoid creating an empty file that might fail to unlink on Windows (due to antivirus/file locks).
+		$has_expired = $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM {$table} WHERE created_at < %s", $cutoff)); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		
+		if ( $has_expired > 0 ) {
+			$filepath = self::backup_filepath('biometric-logs-retention-prune');
+			$written  = self::export_expired_to_csv($filepath, $cutoff);
 
-		if ($written > 0) {
-			$wpdb->query(
-				$wpdb->prepare("DELETE FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-			);
-		} else {
-			// Nothing actually aged out this cycle — don't leave a placeholder "No user
-			// activity" CSV sitting in the Server Document Archive; at a 15-minute cadence
-			// that's up to 96 empty files a day cluttering what should be a list of real backups.
-			@unlink($filepath); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			if ($written > 0) {
+				$wpdb->query(
+					$wpdb->prepare("DELETE FROM {$table} WHERE created_at < %s", $cutoff) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				);
+			} else {
+				@unlink($filepath); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			}
 		}
 	}
 
