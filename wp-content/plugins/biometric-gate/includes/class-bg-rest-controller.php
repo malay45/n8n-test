@@ -22,10 +22,45 @@ class BG_Rest_Controller {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
 		add_filter( 'rest_pre_serve_request', array( __CLASS__, 'force_zero_cache' ), 999, 4 );
 
-		// Process async background emails for tampering alerts
+		// Fires from inside respond_then_notify() below, after the student's own response has
+		// already been sent — this was previously registered but never actually dispatched
+		// anywhere, leaving every tampering branch calling wp_mail() directly and synchronously.
 		add_action( 'bg_send_tamper_alert', function( $to, $subject, $message ) {
 			wp_mail( $to, $subject, $message );
 		}, 10, 3 );
+	}
+
+	/**
+	 * A tampering kill-switch's own redirect_url never depends on whether the admin alert email
+	 * actually sends — it's already fully known from BG_Settings before wp_mail() is ever
+	 * called. But sending that email synchronously before returning the response means the
+	 * whole response is gated on mail delivery, which can easily take longer than bg-gate.js's
+	 * own 3-second kill-switch failsafe (see killSwitch() there): if it does, the browser's
+	 * failsafe wins the race and redirects to '/' instead of the real, correct, already-known
+	 * redirect_url — "the redirect doesn't go where Global Settings says" with no error at all,
+	 * exactly the symptom QA reported, and the likelier it is to reproduce the slower outbound
+	 * mail is on a given day. This sends the real response immediately via the same
+	 * fastcgi_finish_request() detach BG_Admin_Rest_Controller::respond_then_run() already uses
+	 * for exports, then fires the mail after — the browser is never waiting on it.
+	 *
+	 * @param array    $response_body
+	 * @param callable $after Runs after the response is already sent (or inline first, as a
+	 *                        fallback, if fastcgi_finish_request() isn't available).
+	 */
+	private static function respond_then_notify( array $response_body, callable $after ) {
+		if ( function_exists( 'fastcgi_finish_request' ) && ! headers_sent() ) {
+			ignore_user_abort( true );
+			status_header( 200 );
+			header( 'Content-Type: application/json; charset=utf-8' );
+			echo wp_json_encode( $response_body );
+			fastcgi_finish_request();
+
+			$after();
+			exit;
+		}
+
+		$after();
+		return new WP_REST_Response( $response_body, 200 );
 	}
 
 	public static function force_zero_cache( $served, $result, $request, $server ) {
@@ -205,7 +240,7 @@ class BG_Rest_Controller {
 				update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
 				
 				BG_Session::lock_tampered_account( $user_id );
-				
+
 				$admin_email = get_option('admin_email');
 				$user_info = get_userdata( $user_id );
 				$email_body = sprintf(
@@ -213,10 +248,14 @@ class BG_Rest_Controller {
 					$user_id,
 					$user_info->user_email
 				);
-				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
-				
+
 				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
-				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+				return self::respond_then_notify(
+					array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ),
+					function () use ( $admin_email, $email_body ) {
+						do_action( 'bg_send_tamper_alert', $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+					}
+				);
 			}
 
 			BG_Session::mark_verified( $user_id );
@@ -288,7 +327,7 @@ class BG_Rest_Controller {
 				update_user_meta( $user_id, 'biometric_strikes', $strikes + 1 );
 				
 				BG_Session::lock_tampered_account( $user_id );
-				
+
 				$admin_email = get_option('admin_email');
 				$user_info = get_userdata( $user_id );
 				$email_body = sprintf(
@@ -296,10 +335,14 @@ class BG_Rest_Controller {
 					$user_id,
 					$user_info->user_email
 				);
-				wp_mail( $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
-				
+
 				$redirect_url = BG_Settings::get()['tampered_redirect_url'];
-				return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+				return self::respond_then_notify(
+					array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ),
+					function () use ( $admin_email, $email_body ) {
+						do_action( 'bg_send_tamper_alert', $admin_email, 'CRITICAL: Database Tampering Detected', $email_body );
+					}
+				);
 			}
 
 			if ( 'bg_cloud_timeout' === $result->get_error_code() ) {
@@ -373,7 +416,7 @@ class BG_Rest_Controller {
 			update_user_meta( $user_id, 'locked_tampered_reason', $page_title );
 			
 			BG_Session::lock_tampered_account( $user_id );
-			
+
 			$admin_email = get_option('admin_email');
 			$user_info = get_userdata( $user_id );
 			$email_body = sprintf(
@@ -381,10 +424,14 @@ class BG_Rest_Controller {
 				$user_id,
 				$user_info->user_email
 			);
-			wp_mail( $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
-			
+
 			$redirect_url = BG_Settings::get()['tampered_redirect_url'];
-			return new WP_REST_Response( array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ), 200 );
+			return self::respond_then_notify(
+				array( 'status' => 'redirected', 'action' => 'redirect', 'redirect_url' => $redirect_url ),
+				function () use ( $admin_email, $email_body ) {
+					do_action( 'bg_send_tamper_alert', $admin_email, 'CRITICAL: Element Deletion Detected', $email_body );
+				}
+			);
 		}
 
 		self::log( $user_id, 'failure', $request );

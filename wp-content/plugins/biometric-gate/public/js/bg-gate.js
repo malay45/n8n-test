@@ -692,7 +692,20 @@
 
 		var checkTamper = function () {
 			// Phase 1: Immediate Micro-evaluation
-			if (!killSwitchEnabled('domTamper') || !overlayEl || isTamperDebounced) {
+			//
+			// intentionalHide restored here (it was dropped from this early return in a later
+			// change and only re-checked inside the Phase 2 callback below, for just one of the
+			// two verdict branches): hideOverlay() sets intentionalHide=true for its entire
+			// synchronous body, which includes re-parenting the overlay element
+			// (document.body.appendChild) and resetting its style/classes — exactly the kind of
+			// mutation this MutationObserver watches for. Its own "clear intentionalHide"
+			// setTimeout(fn, 0) and Phase 2's deferred verdict setTimeout(fn, 0) are both
+			// macrotasks queued around the same moment, so which one the browser happens to run
+			// first isn't something this code can rely on — checking the flag only inside Phase 2
+			// meant a completely normal hide (after a successful scan, or the Close button) could
+			// race its way into a false "overlay_tampered" kill-switch. Bailing out here instead,
+			// before Phase 2 is even scheduled, doesn't depend on that ordering at all.
+			if (!killSwitchEnabled('domTamper') || !overlayEl || isTamperDebounced || intentionalHide) {
 				return;
 			}
 
@@ -700,7 +713,7 @@
 			// Postpone the security verdict to the next macro-task queue tick.
 			window.setTimeout(function () {
 				// Safe Check A: Did the safety debounce flag flip to true while we waited?
-				if (isTamperDebounced) {
+				if (isTamperDebounced || intentionalHide) {
 					return; // Ignore transitional noise gracefully
 				}
 
@@ -722,7 +735,7 @@
 
 				if (!stillPresent || !cardPresent) {
 					killSwitch('overlay_tampered');
-				} else if (!intentionalHide && liveEl.open && !stillVisible) {
+				} else if (liveEl.open && !stillVisible) {
 					killSwitch('overlay_tampered');
 				}
 			}, 0); // Pushes the evaluation cleanly behind the browser's resize event queue
@@ -1501,9 +1514,19 @@
 				navigateAway(null);
 			});
 
+		// Last-resort only: navigateAway()'s own "first call wins" guard means this never
+		// overrides the real response's redirect_url if it arrives first. QA found the real
+		// response losing this race to a 3-second version of this fallback — the server's
+		// /session/killswitch handler used to send its admin-alert email before returning,
+		// so on a day with slower outbound mail the whole response could easily take longer
+		// than 3s, sending the student to '/' instead of the Global-Settings-configured
+		// redirect with no error at all. The server now responds before sending that email
+		// (see BG_Rest_Controller::respond_then_notify()) so this shouldn't come into play in
+		// practice anymore, but it's kept generous rather than tight as defense-in-depth against
+		// plain network latency, which this plugin has no control over either way.
 		window.setTimeout(function () {
 			navigateAway(null);
-		}, 3000);
+		}, 8000);
 	}
 
 	function apiPost(path, body) {
