@@ -34,6 +34,7 @@
 
 	var overlayEl, videoEl, canvasEl, statusEl, startBtn, closeBtn;
 	var currentTicket = null;
+	var currentTicketTime = 0;
 	var retryCount = 0;
 	var intentionalHide = false;
 	var rescheduleTimer = null;
@@ -240,16 +241,21 @@
 					if (!res.ok && res.status !== 401 && res.status !== 403 && res.status !== 423) {
 						throw new Error('Network down');
 					}
-					return res.text();
+					return res.json().catch(function() { return {}; });
 				})
-				.then(function (text) {
-					// Raw data text string parsed: valid|bypass|locked
-					if (text && text.indexOf('|') !== -1) {
-						var parts = text.split('|');
-						if (parts[2] === '1') {
+				.then(function (json) {
+					if (json) {
+						if (json.locked) {
 							// If account became locked in background
 							if (!isBlockingShell && !overlayEl.open) {
 								window.location.reload();
+							}
+						} else if (json.has_valid_session === false && !json.bypass) {
+							// The true session expiration timestamp has elapsed server-side.
+							// If the local timer hasn't fired yet, it was manipulated or drifted.
+							// Trigger the scan cycle immediately to deny access.
+							if (!isBlockingShell && !overlayEl.open) {
+								runScanCycle();
 							}
 						}
 					}
@@ -329,7 +335,7 @@
 		};
 
 		document.addEventListener('visibilitychange', function () {
-			if (document.hidden) {
+			if (document.visibilityState === 'hidden') {
 				neutralize();
 				if (!reassertTimer) {
 					reassertTimer = window.setInterval(neutralize, 250);
@@ -343,7 +349,7 @@
 			}
 		});
 
-		if (document.hidden) {
+		if (document.visibilityState === 'hidden') {
 			neutralize();
 			reassertTimer = window.setInterval(neutralize, 250);
 		}
@@ -549,6 +555,7 @@
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 		var bypassBtn = overlayEl.querySelector('.bg-gate-dev-bypass-btn');
 		if (bypassBtn) {
@@ -650,12 +657,17 @@
 		 * whenever the timer happens to fire) keeps the flag from clearing before the admin's
 		 * configured delay has genuinely elapsed, without ever clearing it late either.
 		 */
+		var clearCurrentTimeout = null;
 		var triggerTamperDebounce = function () {
 			// default to true if undefined
 			if (config.enableResizeSafetyDelay === false) return;
 			var delay = parseInt(config.resizeSafetyDelayMs, 10) || 2500;
 
-			window.setTimeout(function () {
+			if (clearCurrentTimeout) {
+				window.clearTimeout(clearCurrentTimeout);
+			}
+
+			clearCurrentTimeout = window.setTimeout(function () {
 				isTamperDebounced = true;
 				tamperDebounceDeadline = Date.now() + delay;
 
@@ -673,37 +685,47 @@
 			}, 0);
 		};
 
-		window.addEventListener('resize', triggerTamperDebounce);
-		document.addEventListener('fullscreenchange', triggerTamperDebounce);
-		document.addEventListener('webkitfullscreenchange', triggerTamperDebounce);
+		var lastResizeTimestamp = 0;
+		window.addEventListener('resize', function () { lastResizeTimestamp = performance.now(); triggerTamperDebounce(); });
+		document.documentElement.addEventListener('fullscreenchange', function () { lastResizeTimestamp = performance.now(); triggerTamperDebounce(); });
+		document.documentElement.addEventListener('webkitfullscreenchange', function () { lastResizeTimestamp = performance.now(); triggerTamperDebounce(); });
 
 		var checkTamper = function () {
-			if (!killSwitchEnabled('domTamper') || intentionalHide || !overlayEl || isTamperDebounced) {
+			// Phase 1: Immediate Micro-evaluation
+			if (!killSwitchEnabled('domTamper') || !overlayEl || isTamperDebounced) {
 				return;
 			}
 
-			// Looked up fresh by ID on every check rather than trusting only the closure-captured
-			// overlayEl reference: QA found Firefox (Gecko) specifically failing to lock out when
-			// "Bypass Face Scan Overlay" left the overlay closed-but-present, while Chrome/Edge
-			// caught the same deletion correctly. A stale JS reference could in principle stay
-			// "connected" per one engine's bookkeeping after DevTools replaces/detaches the live
-			// node a different way than another engine does; re-resolving by ID sidesteps that
-			// class of engine-specific reference-identity difference entirely rather than
-			// guessing at Gecko's exact internal behavior.
-			var liveEl = document.getElementById('bg-gate-overlay') || overlayEl;
+			// Phase 2: The Macro-task Validation Bridge
+			// Postpone the security verdict to the next macro-task queue tick.
+			window.setTimeout(function () {
+				// Safe Check A: Did the safety debounce flag flip to true while we waited?
+				if (isTamperDebounced) {
+					return; // Ignore transitional noise gracefully
+				}
 
-			// Use isConnected because the overlay might be moved into a Shadow DOM (e.g.
-			// presto-player) to preserve fullscreen layout in Firefox, which causes
-			// document.body.contains to fail.
-			var stillPresent = !!liveEl && liveEl.isConnected;
-			var cardPresent = stillPresent && !!liveEl.querySelector('.bg-gate-card');
-			var stillVisible = stillPresent && liveEl.open && 'none' !== window.getComputedStyle(liveEl).display;
+				// Safe Check B: Did a window resize event just execute in this exact time bracket?
+				var timeSinceLastResize = performance.now() - lastResizeTimestamp;
+				if (timeSinceLastResize < 150) {
+					return; // Ignore layout shifts caused by browser window snapping
+				}
 
-			if (!stillPresent || !cardPresent) {
-				killSwitch('overlay_tampered');
-			} else if (liveEl.open && !stillVisible) {
-				killSwitch('overlay_tampered');
-			}
+				// Phase 3: Final Security Verification
+				var liveEl = document.getElementById('bg-gate-overlay') || overlayEl;
+
+				// Use isConnected because the overlay might be moved into a Shadow DOM (e.g.
+				// presto-player) to preserve fullscreen layout in Firefox, which causes
+				// document.body.contains to fail.
+				var stillPresent = !!liveEl && liveEl.isConnected;
+				var cardPresent = stillPresent && !!liveEl.querySelector('.bg-gate-card');
+				var stillVisible = stillPresent && liveEl.open && 'none' !== window.getComputedStyle(liveEl).display;
+
+				if (!stillPresent || !cardPresent) {
+					killSwitch('overlay_tampered');
+				} else if (!intentionalHide && liveEl.open && !stillVisible) {
+					killSwitch('overlay_tampered');
+				}
+			}, 0); // Pushes the evaluation cleanly behind the browser's resize event queue
 		};
 
 		var observer = new MutationObserver(checkTamper);
@@ -873,6 +895,7 @@
 				setStatus('');
 				startBtn.disabled = false;
 				startBtn.hidden = false;
+				startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 			}
 		}
 	}
@@ -959,7 +982,7 @@
 	// ---------------------------------------------------------------------
 
 	function runScanCycle() {
-		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell })
 			.then(function (res) {
 				if (res && res.status === 'redirected') {
 					window.location.href = res.redirect_url || '/';
@@ -977,6 +1000,7 @@
 				}
 
 				currentTicket = res.ticket;
+				currentTicketTime = Date.now();
 				retryCount = 0;
 				showOverlay();
 			})
@@ -1010,13 +1034,26 @@
 			}
 		}
 
-		// Defer fetch trigger to avoid main thread hogging
-		window.setTimeout(function () {
-			// Silently refresh the ticket before starting the countdown/camera to avoid
-			// timeout errors if the user left the modal open and idle for > 60s.
-			apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+		var startCameraFlow = function() {
+			if (activeStream) {
+				captureAndSubmit(activeStream, false);
+			} else {
+				setStatus(config.i18n.verifying || "Starting camera...");
+				getValidCameraStream()
+					.then(auditDevicesThenCapture)
+					.catch(function (err) {
+						startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
+						handleCameraError(err);
+					});
+			}
+		};
+
+		var age = Date.now() - currentTicketTime;
+		if (currentTicket && age < 45000) {
+			startCameraFlow();
+		} else {
+			apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell })
 				.then(function (res) {
-					// Restore button text in case of retry
 					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 					if (res && res.status === 'redirected') {
@@ -1025,7 +1062,8 @@
 					}
 					if (res.bypass) {
 						if (isBlockingShell) {
-							window.location.reload();
+							setStatus(config.i18n.loading || 'Loading...');
+							window.location.href = window.location.href.split('#')[0];
 							return;
 						}
 						hideOverlay();
@@ -1034,24 +1072,14 @@
 					}
 
 					currentTicket = res.ticket;
-
-					if (activeStream) {
-						captureAndSubmit(activeStream, false);
-					} else {
-						setStatus(config.i18n.verifying || "Starting camera...");
-						getValidCameraStream()
-							.then(auditDevicesThenCapture)
-							.catch(function (err) {
-								startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
-								handleCameraError(err);
-							});
-					}
+					currentTicketTime = Date.now();
+					startCameraFlow();
 				})
 				.catch(function () {
 					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					showConnectionLost();
 				});
-		}, 250);
+		}
 	}
 
 	function getValidCameraStream() {
@@ -1153,10 +1181,10 @@
 	function measureAverageLuminance(ctx) {
 		// Sample only the center 50% of the frame to prevent dark backgrounds 
 		// or letterboxing black bars from skewing the average, guaranteeing we measure the face!
-		var w = CAPTURE_WIDTH * 0.5;
-		var h = CAPTURE_HEIGHT * 0.5;
-		var x = CAPTURE_WIDTH * 0.25;
-		var y = CAPTURE_HEIGHT * 0.25;
+		var w = Math.floor(CAPTURE_WIDTH * 0.5);
+		var h = Math.floor(CAPTURE_HEIGHT * 0.5);
+		var x = Math.floor(CAPTURE_WIDTH * 0.25);
+		var y = Math.floor(CAPTURE_HEIGHT * 0.25);
 		var data = ctx.getImageData(x, y, w, h).data;
 		var total = 0;
 		var count = 0;
@@ -1223,6 +1251,7 @@
 					setStatus(config.i18n.tooDark || 'Environment Too Dark. Please turn on a light to continue.');
 					startBtn.disabled = false;
 					startBtn.hidden = false;
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					return;
 				}
 
@@ -1230,6 +1259,7 @@
 					setStatus(config.i18n.tooBright || 'Too much light/glare detected.');
 					startBtn.disabled = false;
 					startBtn.hidden = false;
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					return;
 				}
 
@@ -1307,6 +1337,7 @@
 		// instead of giving them a failure strike.
 		setStatus(config.noCameraMessage || config.i18n.noCamera, true);
 		startBtn.disabled = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 		if (activeStream) {
 			stopStream(activeStream);
@@ -1327,16 +1358,26 @@
 		}
 
 		retryCount = 0;
-		hideOverlay();
 
+		if (isBlockingShell) {
+			// Keep overlay open so user doesn't see a blank HTML shell while the page reloads
+			setStatus(config.i18n.loading || 'Loading...');
+			startBtn.hidden = true;
+			var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+			if (videoFrame) {
+				videoFrame.style.display = 'none';
+			}
+			
+			// Use href rewrite for a cleaner reload than window.location.reload()
+			window.location.href = window.location.href.split('#')[0];
+			return;
+		}
+
+		hideOverlay();
+		
 		// Fresh 5-second phase, not whatever point the interval happened to have drifted to —
 		// see startStatusHeartbeat()'s docblock for why this matters right after a scan.
 		startStatusHeartbeat();
-
-		if (isBlockingShell) {
-			window.location.reload();
-			return;
-		}
 
 		scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
 	}
@@ -1372,8 +1413,9 @@
 		}
 
 		startBtn.disabled = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
-		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl }).then(function (res) {
+		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell }).then(function (res) {
 			if (!res.bypass) {
 				currentTicket = res.ticket;
 			}
@@ -1465,10 +1507,13 @@
 	}
 
 	function apiPost(path, body) {
-		return fetch(config.restUrl + path, {
+		var url = config.restUrl + path;
+		url += (url.indexOf('?') === -1 ? '?' : '&') + 'v=' + Date.now();
+		return fetch(url, {
 			method: 'POST',
 			credentials: 'same-origin',
 			priority: 'high', // Force Chrome to jump this ahead of background admin-ajax.php requests
+			cache: 'no-store', // Violently bypass browser caching
 			headers: {
 				'Content-Type': 'application/json',
 				'X-WP-Nonce': config.nonce,

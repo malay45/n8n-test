@@ -29,8 +29,9 @@ class BG_Rest_Controller {
 	}
 
 	public static function force_zero_cache( $served, $result, $request, $server ) {
-		if ( strpos( $request->get_route(), '/session/status' ) !== false ) {
+		if ( strpos( $request->get_route(), BG_REST_NAMESPACE ) !== false ) {
 			// Bypass Cloudways/Nginx/Breeze caching layers at the lowest PHP level
+			// for all validation and operational endpoints
 			header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0', true );
 			header( 'Pragma: no-cache', true );
 			header( 'Expires: Thu, 01 Jan 1970 00:00:00 GMT', true );
@@ -162,6 +163,25 @@ class BG_Rest_Controller {
 		// if the full scan threshold hasn't run out — reverted from a round-2 change that
 		// gated this on has_valid_session() (the full threshold) instead.
 		if ( BG_Session::is_within_guard_window( $user_id ) ) {
+			return new WP_REST_Response(
+				array(
+					'bypass'               => true,
+					'seconds_until_rescan' => self::seconds_until_rescan( $user_id ),
+				),
+				200
+			);
+		}
+
+		// The persistent clock loop (Trigger B) runs asynchronously while the user is on the page.
+		// If the user navigates within the 30s guard window, the entry scan is bypassed.
+		// However, when the client-side timer calls /scan/start again, it is outside the guard
+		// window, but the true server-side expiration (the full 60s threshold) may not have
+		// elapsed yet (due to timer misalignment or page navigation offsets).
+		// We validate the true ongoing server-side expiration timestamp here: if this is NOT a
+		// blocking shell (meaning it's the persistent loop, not a fresh page entry that was
+		// blocked), and the session is still valid, bypass it to maintain the strict 60-second cycle.
+		$is_blocking_shell = filter_var( $request->get_param( 'is_blocking_shell' ), FILTER_VALIDATE_BOOLEAN );
+		if ( ! $is_blocking_shell && BG_Session::has_valid_session( $user_id ) ) {
 			return new WP_REST_Response(
 				array(
 					'bypass'               => true,

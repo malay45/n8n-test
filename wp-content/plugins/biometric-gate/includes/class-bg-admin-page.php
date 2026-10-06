@@ -301,7 +301,7 @@ class BG_Admin_Page {
 					<th scope="row"><label for="retention"><?php esc_html_e( 'Log Retention Purge Limit', 'biometric-gate' ); ?></label></th>
 					<td>
 						<select name="retention" id="retention">
-							<?php foreach ( array( '15m' => '15 Minutes', '1h' => '1 Hour', '1' => '1 Day', '30' => '1 Month', '90' => '3 Months', '180' => '6 Months', '365' => '1 Year', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
+							<?php foreach ( array( '15m' => '15 Minutes', '1h' => '1 Hour', '1' => '1 Day', '7' => '1 Week', '30' => '1 Month', '90' => '3 Months', '180' => '6 Months', '365' => '1 Year', 'forever' => 'Keep Forever' ) as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $settings['retention'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
 						</select>

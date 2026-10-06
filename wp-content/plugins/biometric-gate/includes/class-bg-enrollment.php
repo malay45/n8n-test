@@ -382,7 +382,7 @@ class BG_Enrollment {
 
 		$detect_multipart = self::build_multipart_body(
 			array(
-				'file' => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
+				'img' => array( 'filename' => 'upload.jpg', 'content' => $image_data, 'mime' => $mime_type ),
 				'key'  => $key,
 			)
 		);
