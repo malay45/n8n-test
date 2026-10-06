@@ -555,6 +555,7 @@
 		setStatus('');
 		startBtn.disabled = false;
 		startBtn.hidden = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 		var bypassBtn = overlayEl.querySelector('.bg-gate-dev-bypass-btn');
 		if (bypassBtn) {
@@ -894,6 +895,7 @@
 				setStatus('');
 				startBtn.disabled = false;
 				startBtn.hidden = false;
+				startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 			}
 		}
 	}
@@ -1408,6 +1410,7 @@
 		}
 
 		startBtn.disabled = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell }).then(function (res) {
 			if (!res.bypass) {
