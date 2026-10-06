@@ -400,7 +400,7 @@ class BG_Logs
 		} elseif ( '1h' === $retention ) {
 			$should_run = true;
 			$block_id = $y . '-' . $mon . '-' . $d . '-' . $h;
-		} elseif ( in_array( $retention, array( '1', '30', '90', '180', '365' ), true ) ) {
+		} elseif ( in_array( $retention, array( '1', '7', '30', '90', '180', '365' ), true ) ) {
 			// All day-based windows prune on the same daily cadence, each trimming whatever has
 			// now aged past its own window — see the docblock above: a calendar-boundary cadence
 			// (only on the last day of the month/quarter/half-year, or Dec 31) used to gate the
@@ -460,7 +460,8 @@ class BG_Logs
 
 		global $wpdb;
 		$table  = BG_Activator::table_name();
-		$cutoff = gmdate('Y-m-d H:i:s', time() - $window_seconds);
+		// Modified to act as a pure scheduled export (0-minute retention) per user request.
+		$cutoff = gmdate('Y-m-d H:i:s', time());
 
 		// Query first to avoid creating an empty file that might fail to unlink on Windows (due to antivirus/file locks).
 		$has_expired = $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM {$table} WHERE created_at < %s", $cutoff)); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
