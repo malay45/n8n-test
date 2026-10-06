@@ -1251,6 +1251,7 @@
 					setStatus(config.i18n.tooDark || 'Environment Too Dark. Please turn on a light to continue.');
 					startBtn.disabled = false;
 					startBtn.hidden = false;
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					return;
 				}
 
@@ -1258,6 +1259,7 @@
 					setStatus(config.i18n.tooBright || 'Too much light/glare detected.');
 					startBtn.disabled = false;
 					startBtn.hidden = false;
+					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					return;
 				}
 
@@ -1335,6 +1337,7 @@
 		// instead of giving them a failure strike.
 		setStatus(config.noCameraMessage || config.i18n.noCamera, true);
 		startBtn.disabled = false;
+		startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 		if (activeStream) {
 			stopStream(activeStream);
