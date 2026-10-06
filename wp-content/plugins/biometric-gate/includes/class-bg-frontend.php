@@ -78,11 +78,6 @@ class BG_Frontend {
 				'forceNativeIos'         => ! empty( $settings['force_native_ios'] ),
 				'bypassFaceScan'         => ! empty( $settings['bypass_face_scan'] ),
 				'closeButtonRedirectUrl' => esc_url_raw( $settings['close_button_redirect_url'] ),
-				// Pre-localized so the 'overlay_tampered' kill-switch can navigate immediately,
-				// client-side, instead of waiting on the /session/killswitch round-trip first —
-				// see killSwitch() in bg-gate.js for why that round-trip became a race worth
-				// avoiding specifically for this one, single-destination reason.
-				'tamperedRedirectUrl'    => esc_url_raw( $settings['tampered_redirect_url'] ),
 				'enableResizeSafetyDelay' => (bool) $settings['enable_resize_safety_delay'],
 				'resizeSafetyDelayMs'    => (int) $settings['resize_safety_delay_ms'],
 
