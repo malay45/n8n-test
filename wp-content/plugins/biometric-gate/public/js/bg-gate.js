@@ -34,6 +34,7 @@
 
 	var overlayEl, videoEl, canvasEl, statusEl, startBtn, closeBtn;
 	var currentTicket = null;
+	var currentTicketTime = 0;
 	var retryCount = 0;
 	var intentionalHide = false;
 	var rescheduleTimer = null;
@@ -979,7 +980,7 @@
 	// ---------------------------------------------------------------------
 
 	function runScanCycle() {
-		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell })
 			.then(function (res) {
 				if (res && res.status === 'redirected') {
 					window.location.href = res.redirect_url || '/';
@@ -997,6 +998,7 @@
 				}
 
 				currentTicket = res.ticket;
+				currentTicketTime = Date.now();
 				retryCount = 0;
 				showOverlay();
 			})
@@ -1030,13 +1032,26 @@
 			}
 		}
 
-		// Defer fetch trigger to avoid main thread hogging
-		window.setTimeout(function () {
-			// Silently refresh the ticket before starting the countdown/camera to avoid
-			// timeout errors if the user left the modal open and idle for > 60s.
-			apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl })
+		var startCameraFlow = function() {
+			if (activeStream) {
+				captureAndSubmit(activeStream, false);
+			} else {
+				setStatus(config.i18n.verifying || "Starting camera...");
+				getValidCameraStream()
+					.then(auditDevicesThenCapture)
+					.catch(function (err) {
+						startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
+						handleCameraError(err);
+					});
+			}
+		};
+
+		var age = Date.now() - currentTicketTime;
+		if (currentTicket && age < 45000) {
+			startCameraFlow();
+		} else {
+			apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell })
 				.then(function (res) {
-					// Restore button text in case of retry
 					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 
 					if (res && res.status === 'redirected') {
@@ -1045,7 +1060,8 @@
 					}
 					if (res.bypass) {
 						if (isBlockingShell) {
-							window.location.reload();
+							setStatus(config.i18n.loading || 'Loading...');
+							window.location.href = window.location.href.split('#')[0];
 							return;
 						}
 						hideOverlay();
@@ -1054,24 +1070,14 @@
 					}
 
 					currentTicket = res.ticket;
-
-					if (activeStream) {
-						captureAndSubmit(activeStream, false);
-					} else {
-						setStatus(config.i18n.verifying || "Starting camera...");
-						getValidCameraStream()
-							.then(auditDevicesThenCapture)
-							.catch(function (err) {
-								startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
-								handleCameraError(err);
-							});
-					}
+					currentTicketTime = Date.now();
+					startCameraFlow();
 				})
 				.catch(function () {
 					startBtn.innerHTML = config.i18n.startScan || 'Start Face Scan';
 					showConnectionLost();
 				});
-		}, 250);
+		}
 	}
 
 	function getValidCameraStream() {
@@ -1347,16 +1353,26 @@
 		}
 
 		retryCount = 0;
-		hideOverlay();
 
+		if (isBlockingShell) {
+			// Keep overlay open so user doesn't see a blank HTML shell while the page reloads
+			setStatus(config.i18n.loading || 'Loading...');
+			startBtn.hidden = true;
+			var videoFrame = overlayEl.querySelector('.bg-gate-video-frame');
+			if (videoFrame) {
+				videoFrame.style.display = 'none';
+			}
+			
+			// Use href rewrite for a cleaner reload than window.location.reload()
+			window.location.href = window.location.href.split('#')[0];
+			return;
+		}
+
+		hideOverlay();
+		
 		// Fresh 5-second phase, not whatever point the interval happened to have drifted to —
 		// see startStatusHeartbeat()'s docblock for why this matters right after a scan.
 		startStatusHeartbeat();
-
-		if (isBlockingShell) {
-			window.location.reload();
-			return;
-		}
 
 		scheduleNextCheck(res.seconds_until_rescan || config.scanThresholdSec);
 	}
@@ -1393,7 +1409,7 @@
 
 		startBtn.disabled = false;
 
-		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl }).then(function (res) {
+		apiPost('/scan/start', { page_title: config.pageTitle, page_url: config.pageUrl, is_blocking_shell: isBlockingShell }).then(function (res) {
 			if (!res.bypass) {
 				currentTicket = res.ticket;
 			}

@@ -172,6 +172,25 @@ class BG_Rest_Controller {
 			);
 		}
 
+		// The persistent clock loop (Trigger B) runs asynchronously while the user is on the page.
+		// If the user navigates within the 30s guard window, the entry scan is bypassed.
+		// However, when the client-side timer calls /scan/start again, it is outside the guard
+		// window, but the true server-side expiration (the full 60s threshold) may not have
+		// elapsed yet (due to timer misalignment or page navigation offsets).
+		// We validate the true ongoing server-side expiration timestamp here: if this is NOT a
+		// blocking shell (meaning it's the persistent loop, not a fresh page entry that was
+		// blocked), and the session is still valid, bypass it to maintain the strict 60-second cycle.
+		$is_blocking_shell = filter_var( $request->get_param( 'is_blocking_shell' ), FILTER_VALIDATE_BOOLEAN );
+		if ( ! $is_blocking_shell && BG_Session::has_valid_session( $user_id ) ) {
+			return new WP_REST_Response(
+				array(
+					'bypass'               => true,
+					'seconds_until_rescan' => self::seconds_until_rescan( $user_id ),
+				),
+				200
+			);
+		}
+
 		$settings = BG_Settings::get();
 		if ( ! empty( $settings['bypass_face_scan'] ) ) {
 			// CRITICAL: Even in bypass mode, we MUST verify database string integrity on every interval.
