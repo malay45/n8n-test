@@ -1,0 +1,33 @@
+.doie-wrap .doie-card {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	padding: 4px 20px 12px;
+	margin-top: 16px;
+	max-width: 960px;
+}
+.doie-wrap .doie-badge {
+	display: inline-block;
+	background: #edfaef;
+	border-left: 4px solid #00a32a;
+	padding: 6px 10px;
+}
+.doie-wrap .doie-statuses label {
+	display: inline-block;
+	min-width: 160px;
+	margin-bottom: 4px;
+}
+.doie-wrap progress {
+	width: 100%;
+	height: 18px;
+}
+.doie-wrap .doie-messages {
+	max-height: 320px;
+	overflow: auto;
+	font-family: monospace;
+}
+.doie-wrap .doie-error {
+	color: #b32d2e;
+}
+.doie-wrap .doie-warning {
+	color: #996800;
+}
