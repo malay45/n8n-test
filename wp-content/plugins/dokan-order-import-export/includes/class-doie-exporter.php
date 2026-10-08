@@ -294,14 +294,7 @@ class DOIE_Exporter {
 			if ( in_array( $data['key'], $skip, true ) ) {
 				continue;
 			}
-			$value = $data['value'];
-			if ( is_object( $value ) ) {
-				$value = json_decode( wp_json_encode( $value ), true );
-			}
-			$out[] = array(
-				'key'   => $data['key'],
-				'value' => $value,
-			);
+			$out[] = DOIE_Format::export_meta( $data['key'], $data['value'] );
 		}
 		return $out;
 	}

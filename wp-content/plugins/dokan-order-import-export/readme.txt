@@ -26,7 +26,9 @@ Admin screen: WooCommerce → Order Import / Export (needs the `manage_woocommer
 = Import =
 * Batched with AJAX, so large files do not time out. Parent orders are always imported before their sub-orders.
 * Duplicate protection: each imported order stores its original ID. You can skip, update or always create new orders when the same order is imported again.
-* Vendors are matched by email first, then by store name, so imports work between sites where the user IDs differ. Customers are matched by email. Products are matched by SKU, then by ID.
+* Vendors are matched by email first, then by store name, so imports work between sites where the user IDs differ. Customers are matched by email. Products are matched by SKU, then by ID (on another site only if the name also matches), then by a unique exact product name.
+* Meta values that contain PHP objects (for example the `coupon_data` snapshot Dokan stores on sub-order coupons) are exported with a serialized copy and restored as objects. Only `WC_Meta_Data`, `stdClass` and date classes are unserialized; change the list with the `doie_import_allowed_meta_classes` filter. Files from older versions are repaired on import.
+* If an order fails, the error message names the file and line where it happened, so you can tell which plugin caused it.
 * Dokan bookkeeping is rebuilt: `_dokan_vendor_id`, `has_sub_order`, the parent/sub-order link, `dokan_orders` rows and `dokan_vendor_balance` ledger rows. By default the exported vendor earning and admin commission are kept. Untick the option to have Dokan recalculate them with the current commission settings.
 * Dokan does not re-split imported orders into new sub-orders.
 * By default the import sends no emails, does not change stock, and does not increase sales or coupon-usage counts. Each of these can be turned on.

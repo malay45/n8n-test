@@ -398,7 +398,7 @@ class DOIE_Importer {
 		}
 		foreach ( $line['meta'] as $meta ) {
 			if ( is_array( $meta ) && isset( $meta['key'] ) && '' !== $meta['key'] ) {
-				$item->add_meta_data( (string) $meta['key'], isset( $meta['value'] ) ? $meta['value'] : '', false );
+				$item->add_meta_data( (string) $meta['key'], DOIE_Format::import_meta_value( $meta ), false );
 			}
 		}
 	}
@@ -434,12 +434,41 @@ class DOIE_Importer {
 		foreach ( array( 'variation_id', 'product_id' ) as $key ) {
 			if ( ! empty( $line[ $key ] ) ) {
 				$product = wc_get_product( absint( $line[ $key ] ) );
-				if ( $product ) {
+				$trusted = $this->options['match_by_id'] || empty( $line['name'] );
+				if ( $product && ( $trusted || $this->same_product_name( $product, $line['name'] ) ) ) {
 					return $product;
 				}
 			}
 		}
+
+		// Last resort for products without SKU: a single product with exactly this name.
+		if ( ! empty( $line['name'] ) ) {
+			$ids = get_posts(
+				array(
+					'post_type'      => array( 'product', 'product_variation' ),
+					'post_status'    => 'any',
+					'title'          => $line['name'],
+					'posts_per_page' => 2,
+					'fields'         => 'ids',
+				)
+			);
+			if ( 1 === count( $ids ) ) {
+				return wc_get_product( $ids[0] );
+			}
+		}
 		return null;
+	}
+
+	/**
+	 * Guards ID matching between sites: product #123 here may be a different product.
+	 *
+	 * @param WC_Product $product Product found by ID.
+	 * @param string     $name    Line item name from the export.
+	 * @return bool
+	 */
+	private function same_product_name( WC_Product $product, $name ) {
+		$name = wp_strip_all_tags( (string) $name );
+		return 0 === strcasecmp( $product->get_name(), $name ) || 0 === stripos( $name, $product->get_title() );
 	}
 
 	/**
@@ -594,7 +623,7 @@ class DOIE_Importer {
 			if ( ! isset( $meta['key'] ) || '' === $meta['key'] || in_array( $meta['key'], self::PROTECTED_META, true ) ) {
 				continue;
 			}
-			$order->update_meta_data( (string) $meta['key'], isset( $meta['value'] ) ? $meta['value'] : '' );
+			$order->update_meta_data( (string) $meta['key'], DOIE_Format::import_meta_value( $meta ) );
 		}
 	}
 

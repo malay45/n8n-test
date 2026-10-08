@@ -131,6 +131,129 @@ class DOIE_Format {
 	}
 
 	/**
+	 * Builds the export entry for one meta value. Values holding PHP objects (for example the
+	 * WC_Meta_Data objects inside the coupon_data snapshot Dokan stores on sub-order coupons) lose
+	 * their type in JSON, and plugins reading them back expect objects. Such values also carry a
+	 * serialized copy that import_meta_value() restores.
+	 *
+	 * @param string $key   Meta key.
+	 * @param mixed  $value Meta value.
+	 * @return array
+	 */
+	public static function export_meta( $key, $value ) {
+		$entry = array(
+			'key'   => $key,
+			'value' => self::contains_object( $value ) ? json_decode( wp_json_encode( $value ), true ) : $value,
+		);
+		if ( self::contains_object( $value ) ) {
+			$entry['php'] = base64_encode( serialize( $value ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+		}
+		return $entry;
+	}
+
+	/**
+	 * Restores a meta value from an export entry.
+	 *
+	 * @param array $entry Entry with key, value and optional php.
+	 * @return mixed
+	 */
+	public static function import_meta_value( array $entry ) {
+		if ( ! empty( $entry['php'] ) && is_string( $entry['php'] ) ) {
+			$serialized = base64_decode( $entry['php'], true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+			$allowed    = apply_filters( 'doie_import_allowed_meta_classes', array( 'WC_Meta_Data', 'stdClass', 'WC_DateTime', 'DateTime', 'DateTimeZone' ) );
+			if ( is_string( $serialized ) && self::only_allowed_classes( $serialized, $allowed ) ) {
+				$value = @unserialize( $serialized, array( 'allowed_classes' => $allowed ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.PHP.DiscouragedPHPFunctions
+				if ( false !== $value || 'b:0;' === $serialized ) {
+					return $value;
+				}
+			}
+		}
+		return self::rehydrate( isset( $entry['value'] ) ? $entry['value'] : '' );
+	}
+
+	/**
+	 * Files exported before the php field existed hold WC_Meta_Data objects as {id, key, value}
+	 * arrays under a meta_data key; turn those back into objects.
+	 *
+	 * @param mixed $value Value.
+	 * @return mixed
+	 */
+	public static function rehydrate( $value ) {
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+		foreach ( $value as $k => $child ) {
+			if ( 'meta_data' === $k && is_array( $child ) && self::is_meta_list( $child ) ) {
+				$value[ $k ] = array_map(
+					function ( $meta ) {
+						return new WC_Meta_Data(
+							array(
+								'id'    => isset( $meta['id'] ) ? $meta['id'] : null,
+								'key'   => $meta['key'],
+								'value' => self::rehydrate( $meta['value'] ),
+							)
+						);
+					},
+					$child
+				);
+			} else {
+				$value[ $k ] = self::rehydrate( $child );
+			}
+		}
+		return $value;
+	}
+
+	/**
+	 * @param array $list Candidate list.
+	 * @return bool
+	 */
+	private static function is_meta_list( array $list ) {
+		if ( ! wp_is_numeric_array( $list ) ) {
+			return false;
+		}
+		foreach ( $list as $item ) {
+			if ( ! is_array( $item ) || ! array_key_exists( 'key', $item ) || ! array_key_exists( 'value', $item ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * @param mixed $value Value.
+	 * @return bool
+	 */
+	private static function contains_object( $value ) {
+		if ( is_object( $value ) ) {
+			return true;
+		}
+		if ( is_array( $value ) ) {
+			foreach ( $value as $child ) {
+				if ( self::contains_object( $child ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * @param string   $serialized Serialized string.
+	 * @param string[] $allowed    Allowed class names.
+	 * @return bool
+	 */
+	private static function only_allowed_classes( $serialized, array $allowed ) {
+		preg_match_all( '/(?:^|[;{}])[OC]:\d+:"([^"]+)"/', $serialized, $matches );
+		$allowed = array_map( 'strtolower', $allowed );
+		foreach ( $matches[1] as $class ) {
+			if ( ! in_array( strtolower( $class ), $allowed, true ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
 	 * Detects the file format from a file name.
 	 *
 	 * @param string $filename File name.

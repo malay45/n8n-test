@@ -166,7 +166,7 @@ class DOIE_Job {
 				}
 			} catch ( Throwable $e ) {
 				++$state['failed'];
-				self::message( $state, 'error', $label . ' ' . $e->getMessage() );
+				self::message( $state, 'error', $label . ' ' . $e->getMessage() . self::origin( $e ) );
 			}
 		}
 		$state['offset'] = ftell( $handle );
@@ -180,6 +180,21 @@ class DOIE_Job {
 		}
 		self::save( $state );
 		return $state;
+	}
+
+	/**
+	 * Names the file where an error was raised, so a failing third-party plugin can be identified.
+	 *
+	 * @param Throwable $e Error.
+	 * @return string
+	 */
+	private static function origin( Throwable $e ) {
+		$file = wp_normalize_path( $e->getFile() );
+		$root = wp_normalize_path( WP_CONTENT_DIR );
+		if ( 0 === strpos( $file, $root ) ) {
+			$file = 'wp-content' . substr( $file, strlen( $root ) );
+		}
+		return ' (' . $file . ':' . $e->getLine() . ')';
 	}
 
 	/**
